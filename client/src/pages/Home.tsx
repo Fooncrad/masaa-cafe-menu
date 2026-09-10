@@ -86,7 +86,6 @@ export default function Home() {
           <button className="icon-button cart-button" aria-label="السلة" title="السلة" onClick={() => setCartOpen(true)}><ShoppingBag size={19} /><span className="cart-badge">{cartCount}</span><span className="desktop-label">{language === "AR" ? "السلة" : "Cart"}</span></button>
           <button className="icon-button mobile-menu-button" aria-label="القائمة" onClick={() => setMenuOpen((value) => !value)}><Menu size={20} /></button>
         </div>
-        <a className="brand" href="#home" aria-label="مساء كافيه"><strong>مساء</strong><span>cafe</span></a>
         <div className={`mobile-menu ${menuOpen ? "is-open" : ""}`}>
           <a href="#menu" onClick={() => setMenuOpen(false)}>قائمة الطعام</a><a href="#about" onClick={() => setMenuOpen(false)}>عن مساء</a><a href="#contact" onClick={() => setMenuOpen(false)}>تواصل معنا</a>
         </div>
