@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { menuSections, products as sourceProducts } from "@/data/menu";
 import {
@@ -115,11 +115,14 @@ export default function Home() {
           {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)} role="tab" aria-selected={category === item}>{language === "AR" ? item : categoryEnglish[item]}</button>)}
         </div>
         <div className="product-grid">
-          {visibleProducts.map((product) => (
-            <article className="product-card" key={product.id} onClick={() => setSelected(product)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && setSelected(product)}>
+          {visibleProducts.map((product, index) => (
+            <Fragment key={product.id}>
+            {(index === 0 || visibleProducts[index - 1]?.category !== product.category) && <div className="category-separator"><span>{language === "AR" ? product.category : product.categoryEnglish}</span><small>{products.filter((item) => item.category === product.category).length}</small></div>}
+            <article className="product-card" onClick={() => setSelected(product)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && setSelected(product)}>
               <div className="product-image-wrap"><img src={product.image} alt={language === "AR" ? product.name : product.english} loading="lazy" />{product.discount > 0 && <span className="discount">-{product.discount}%</span>}<span className="availability"><i /> {language === "AR" ? "متوفر" : "Available"}</span><button className="quick-add" aria-label={`${language === "AR" ? "إضافة" : "Add"} ${language === "AR" ? product.name : product.english}`} onClick={(event) => { event.stopPropagation(); addToCart(product.id); }}><Plus size={16} /></button></div>
               <div className="product-info"><span className="product-category">{language === "AR" ? product.category : product.categoryEnglish}</span><h3>{language === "AR" ? product.name : product.english}</h3><div className="price-row"><strong>{product.price} <small>{language === "AR" ? "ر.س" : "SAR"}</small></strong>{product.oldPrice && <del>{product.oldPrice} {language === "AR" ? "ر.س" : "SAR"}</del>}</div></div>
             </article>
+            </Fragment>
           ))}
         </div>
       </section>
