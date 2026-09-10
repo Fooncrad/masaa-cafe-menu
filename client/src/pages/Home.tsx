@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -16,7 +17,8 @@ import {
   Play,
   Minus,
   ListFilter,
-  QrCode,
+  CalendarDays,
+  Clock3,
 } from "lucide-react";
 
 type Product = {
@@ -59,6 +61,8 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sectionsOpen, setSectionsOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [bookingSent, setBookingSent] = useState(false);
 
   const visibleProducts = useMemo(
     () => category === "الكل" ? products : products.filter((product) => product.category === category),
@@ -87,7 +91,10 @@ export default function Home() {
           <button className="icon-button mobile-menu-button" aria-label="القائمة" onClick={() => setMenuOpen((value) => !value)}><Menu size={20} /></button>
         </div>
         <div className={`mobile-menu ${menuOpen ? "is-open" : ""}`}>
-          <a href="#menu" onClick={() => setMenuOpen(false)}>قائمة الطعام</a><a href="#about" onClick={() => setMenuOpen(false)}>عن مساء</a><a href="#contact" onClick={() => setMenuOpen(false)}>تواصل معنا</a>
+          <div className="mobile-menu-section"><b>الأقسام</b>{categories.map((item) => <button key={item} onClick={() => { setCategory(item); setMenuOpen(false); document.getElementById("menu")?.scrollIntoView({ behavior: "smooth" }); }}><span>{item}</span><small>{item === "الكل" ? products.length : products.filter((product) => product.category === item).length}</small></button>)}</div>
+          <button className="booking-menu-button" onClick={() => { setMenuOpen(false); setBookingOpen(true); setBookingSent(false); }}><CalendarDays size={17} /> احجز طاولة</button>
+          <div className="working-hours"><Clock3 size={17} /><div><b>أوقات العمل</b><span>السبت–الخميس: 7 ص – 12 ص</span><span>الجمعة: 1 م – 1 ص</span></div></div>
+          <div className="mobile-menu-links"><a href="#about" onClick={() => setMenuOpen(false)}>عن مساء</a><a href="#contact" onClick={() => setMenuOpen(false)}>تواصل معنا</a></div>
         </div>
       </header>
 
@@ -99,7 +106,7 @@ export default function Home() {
           <a href="#contact" aria-label="TikTok" className="text-social">♪</a>
           <a href="#contact" aria-label="X" className="text-social">𝕏</a>
           <div className="side-logo" aria-label="مساء cafe"><strong>مساء</strong><span>cafe</span></div>
-          <a href="#menu" className="qr-menu" aria-label="QR menu"><QrCode size={22} /><small>QR MENU</small></a>
+          <a href="#menu" className="qr-menu" aria-label="فتح قائمة الطعام" title="امسح الرمز أو اضغط لفتح المنيو"><QRCodeSVG value="https://masaamenus-epdxkvyr.manus.space/#menu" size={42} bgColor="transparent" fgColor="#ffffff" level="H" includeMargin={false} /><small>QR MENU</small></a>
         </div>
         <div className="hero-content">
           <p className="eyebrow">{language === "AR" ? "تجربة قهوة استثنائية" : "An exceptional coffee experience"}</p>
@@ -132,6 +139,8 @@ export default function Home() {
       <section className="story-section" id="about"><div className="story-image" /><div className="story-copy"><p className="eyebrow accent">عن مساء</p><h2>مساحتك الهادئة<br />وسط إيقاع المدينة</h2><p>نختار حبوبنا بعناية، ونحمصها بشغف، ونقدمها لك في أجواء صُممت لتعود إليها كل يوم.</p><button className="outline-button">اكتشف قصتنا <ArrowLeft size={16} /></button></div></section>
       <footer id="contact"><div className="footer-brand"><strong>مساء</strong><span>cafe</span></div><p>قهوتك، مزاجك، مساحتك.</p><div className="footer-links"><a href="#menu">المنيو</a><a href="#about">عن مساء</a><a href="#contact">تواصل معنا</a></div><small>© 2026 مساء كافيه. جميع الحقوق محفوظة.</small></footer>
       <button className={`floating-cart ${cartCount > 0 ? "has-items" : ""}`} onClick={() => setCartOpen(true)} aria-label="فتح السلة"><ShoppingBag size={21} /><span>{cartCount}</span></button>
+
+      {bookingOpen && <div className="modal-backdrop" onClick={() => setBookingOpen(false)}><div className="booking-modal" onClick={(event) => event.stopPropagation()}><button className="close-button" onClick={() => setBookingOpen(false)} aria-label="إغلاق"><X size={20} /></button>{bookingSent ? <div className="booking-success"><CalendarDays size={38} /><h2>تم استلام طلب الحجز</h2><p>سنتواصل معك لتأكيد الموعد في أقرب وقت.</p><button className="primary-button" onClick={() => setBookingOpen(false)}>تم</button></div> : <><p className="eyebrow accent">احجز طاولتك</p><h2>موعدك في مساء</h2><p className="booking-note">أدخل البيانات المطلوبة وسنتواصل معك لتأكيد الحجز.</p><form className="booking-form" onSubmit={(event) => { event.preventDefault(); setBookingSent(true); }}><label>الاسم الكامل<input required name="name" placeholder="اكتب اسمك" /></label><label>رقم الجوال<input required name="phone" type="tel" inputMode="tel" placeholder="05xxxxxxxx" /></label><div className="booking-fields"><label>التاريخ<input required name="date" type="date" /></label><label>الوقت<input required name="time" type="time" /></label></div><label>عدد الأشخاص<select required name="guests" defaultValue="2"><option value="1">شخص واحد</option><option value="2">شخصان</option><option value="3">3 أشخاص</option><option value="4">4 أشخاص</option><option value="5">5 أشخاص</option><option value="6">6 أشخاص أو أكثر</option></select></label><label>ملاحظات<textarea name="notes" rows={3} placeholder="مناسبة خاصة أو طلب إضافي" /></label><button className="primary-button booking-submit" type="submit">إرسال طلب الحجز</button></form></>}</div></div>}
 
       {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><div className="product-modal" onClick={(event) => event.stopPropagation()}><button className="close-button" onClick={() => setSelected(null)} aria-label="إغلاق"><X size={20} /></button><img src={selected.image} alt={selected.name} /><div className="modal-body"><span className="product-category">{selected.category}</span><h2>{selected.name}</h2><p>{selected.description}</p><div className="modal-bottom"><strong>{selected.price} <small>ر.س</small></strong><button className="primary-button" onClick={() => { addToCart(selected.id); setSelected(null); setCartOpen(true); }}>أضف للسلة <Plus size={17} /></button></div></div></div></div>}
       {cartOpen && <div className="drawer-backdrop" onClick={() => setCartOpen(false)}><aside className="cart-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><p className="eyebrow accent">سلة مشترياتك</p><h2>طلباتك اللذيذة</h2></div><button className="close-button" onClick={() => setCartOpen(false)} aria-label="إغلاق"><X size={20} /></button></div>{cartItems.length === 0 ? <div className="empty-cart"><ShoppingBag size={34} /><p>السلة فارغة حاليًا</p><button className="primary-button" onClick={() => setCartOpen(false)}>استكشف المنيو</button></div> : <><div className="cart-list">{cartItems.map((product) => <div className="cart-item" key={product.id}><img src={product.image} alt={product.name} /><div><h3>{product.name}</h3><strong>{product.price} ر.س</strong><div className="quantity"><button onClick={() => removeFromCart(product.id)}><Minus size={13} /></button><span>{cart[product.id]}</span><button onClick={() => addToCart(product.id)}><Plus size={13} /></button></div></div></div>)}</div><div className="cart-total"><span>الإجمالي</span><strong>{cartTotal} ر.س</strong></div><button className="primary-button checkout">إتمام الطلب <ChevronLeft size={17} /></button></>}</aside></div>}

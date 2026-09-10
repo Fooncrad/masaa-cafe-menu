@@ -1,0 +1,12 @@
+Mobile visual verification at 390x844:
+- Hamburger button is positioned at the far right of the top bar.
+- A real rendered QR SVG is visible below the side logo and social icons.
+- QR links to the menu section and is visually larger.
+- TypeScript check and Vitest suite pass.
+
+Browser interaction note:
+- Initial browser tab had stale HMR state, so its interaction result reflected the previous menu implementation.
+- Source and dev-server response confirm the new booking button, reservation modal, working hours, categories, and deployed QR URL are present.
+- Removed an unintended trailing text fragment from client/index.html before final retest.
+After reloading the preview, the stray trailing text is gone. The rendered QR SVG remains present and the menu anchor is clickable. The first synchronous interaction probe did not wait for React state updates, so a delayed asynchronous probe is required for the menu and reservation modal.
+The delayed browser interaction test passed: the mobile menu opens, category controls and working hours are present, the reservation modal opens, five required fields are rendered, and the QR is a real SVG linked to the menu section. The encoded QR value points to the deployed menu URL.
