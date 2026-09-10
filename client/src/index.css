@@ -159,3 +159,17 @@ footer { border-top: 1px solid var(--line); padding: 34px clamp(18px, 4vw, 64px)
   .qr-menu { width: 68px !important; height: 73px !important; }
   .qr-menu svg { width: 48px !important; height: 48px !important; }
 }
+
+/* Compact mobile hero and immediate menu start */
+@media (max-width: 700px) {
+  .hero { height: 56svh; min-height: 460px; max-height: 525px; }
+  .hero-mark { top: 7%; width: 66px; height: 66px; }
+  .hero-mark span { font-size: 24px; }
+  .hero-content { padding: 72px 42px 12px; }
+  .hero h1 { font-size: clamp(32px, 9vw, 42px); }
+  .hero-subtitle { margin: 11px 0 17px; }
+  .hero-cta { padding: 10px 17px; font-size: 12px; }
+  .hero-scroll { bottom: 9px; }
+  .hero-scroll span { height: 18px; }
+  .menu-section { padding-top: 28px; }
+}
