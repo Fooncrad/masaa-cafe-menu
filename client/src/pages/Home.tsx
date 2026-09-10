@@ -46,6 +46,7 @@ const products: Product[] = [
 ];
 
 const categories = ["الكل", "قهوة مختصة", "مشروبات باردة", "الحلويات", "المخبوزات"];
+const categoryEnglish: Record<string, string> = { "الكل": "All", "قهوة مختصة": "Specialty coffee", "مشروبات باردة": "Cold drinks", "الحلويات": "Desserts", "المخبوزات": "Bakery" };
 
 export default function Home() {
   const [dark, setDark] = useState(true);
@@ -119,8 +120,8 @@ export default function Home() {
         <div className="product-grid">
           {visibleProducts.map((product) => (
             <article className="product-card" key={product.id} onClick={() => setSelected(product)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && setSelected(product)}>
-              <div className="product-image-wrap"><img src={product.image} alt={product.name} loading="lazy" /><span className="discount">-{product.discount}%</span><span className="availability"><i /> متوفر</span><button className="quick-add" aria-label={`إضافة ${product.name}`} onClick={(event) => { event.stopPropagation(); addToCart(product.id); }}><Plus size={16} /></button></div>
-              <div className="product-info"><span className="product-category">{product.category}</span><h3>{product.name}</h3><p className="product-english">{product.english}</p><div className="price-row"><strong>{product.price} <small>ر.س</small></strong><del>{product.oldPrice} ر.س</del></div></div>
+              <div className="product-image-wrap"><img src={product.image} alt={language === "AR" ? product.name : product.english} loading="lazy" /><span className="discount">-{product.discount}%</span><span className="availability"><i /> {language === "AR" ? "متوفر" : "Available"}</span><button className="quick-add" aria-label={`${language === "AR" ? "إضافة" : "Add"} ${language === "AR" ? product.name : product.english}`} onClick={(event) => { event.stopPropagation(); addToCart(product.id); }}><Plus size={16} /></button></div>
+              <div className="product-info"><span className="product-category">{language === "AR" ? product.category : categoryEnglish[product.category]}</span><h3>{language === "AR" ? product.name : product.english}</h3><div className="price-row"><strong>{product.price} <small>ر.س</small></strong><del>{product.oldPrice} ر.س</del></div></div>
             </article>
           ))}
         </div>
