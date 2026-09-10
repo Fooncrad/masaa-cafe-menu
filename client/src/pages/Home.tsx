@@ -16,6 +16,7 @@ import {
   Play,
   Minus,
   ListFilter,
+  QrCode,
 } from "lucide-react";
 
 type Product = {
@@ -98,6 +99,8 @@ export default function Home() {
           <a href="#contact" aria-label="WhatsApp"><MessageCircle size={18} /></a>
           <a href="#contact" aria-label="TikTok" className="text-social">♪</a>
           <a href="#contact" aria-label="X" className="text-social">𝕏</a>
+          <div className="side-logo" aria-label="مساء cafe"><strong>مساء</strong><span>cafe</span></div>
+          <a href="#menu" className="qr-menu" aria-label="QR menu"><QrCode size={22} /><small>QR MENU</small></a>
         </div>
         <div className="hero-content">
           <p className="eyebrow">{language === "AR" ? "تجربة قهوة استثنائية" : "An exceptional coffee experience"}</p>
@@ -129,6 +132,7 @@ export default function Home() {
 
       <section className="story-section" id="about"><div className="story-image" /><div className="story-copy"><p className="eyebrow accent">عن مساء</p><h2>مساحتك الهادئة<br />وسط إيقاع المدينة</h2><p>نختار حبوبنا بعناية، ونحمصها بشغف، ونقدمها لك في أجواء صُممت لتعود إليها كل يوم.</p><button className="outline-button">اكتشف قصتنا <ArrowLeft size={16} /></button></div></section>
       <footer id="contact"><div className="footer-brand"><strong>مساء</strong><span>cafe</span></div><p>قهوتك، مزاجك، مساحتك.</p><div className="footer-links"><a href="#menu">المنيو</a><a href="#about">عن مساء</a><a href="#contact">تواصل معنا</a></div><small>© 2026 مساء كافيه. جميع الحقوق محفوظة.</small></footer>
+      <button className={`floating-cart ${cartCount > 0 ? "has-items" : ""}`} onClick={() => setCartOpen(true)} aria-label="فتح السلة"><ShoppingBag size={21} /><span>{cartCount}</span></button>
 
       {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><div className="product-modal" onClick={(event) => event.stopPropagation()}><button className="close-button" onClick={() => setSelected(null)} aria-label="إغلاق"><X size={20} /></button><img src={selected.image} alt={selected.name} /><div className="modal-body"><span className="product-category">{selected.category}</span><h2>{selected.name}</h2><p>{selected.description}</p><div className="modal-bottom"><strong>{selected.price} <small>ر.س</small></strong><button className="primary-button" onClick={() => { addToCart(selected.id); setSelected(null); setCartOpen(true); }}>أضف للسلة <Plus size={17} /></button></div></div></div></div>}
       {cartOpen && <div className="drawer-backdrop" onClick={() => setCartOpen(false)}><aside className="cart-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><p className="eyebrow accent">سلة مشترياتك</p><h2>طلباتك اللذيذة</h2></div><button className="close-button" onClick={() => setCartOpen(false)} aria-label="إغلاق"><X size={20} /></button></div>{cartItems.length === 0 ? <div className="empty-cart"><ShoppingBag size={34} /><p>السلة فارغة حاليًا</p><button className="primary-button" onClick={() => setCartOpen(false)}>استكشف المنيو</button></div> : <><div className="cart-list">{cartItems.map((product) => <div className="cart-item" key={product.id}><img src={product.image} alt={product.name} /><div><h3>{product.name}</h3><strong>{product.price} ر.س</strong><div className="quantity"><button onClick={() => removeFromCart(product.id)}><Minus size={13} /></button><span>{cart[product.id]}</span><button onClick={() => addToCart(product.id)}><Plus size={13} /></button></div></div></div>)}</div><div className="cart-total"><span>الإجمالي</span><strong>{cartTotal} ر.س</strong></div><button className="primary-button checkout">إتمام الطلب <ChevronLeft size={17} /></button></>}</aside></div>}
