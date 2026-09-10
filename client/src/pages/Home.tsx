@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   ChevronLeft,
+  ChevronDown,
   Globe2,
   Instagram,
   Menu,
@@ -14,6 +15,7 @@ import {
   MessageCircle,
   Play,
   Minus,
+  ListFilter,
 } from "lucide-react";
 
 type Product = {
@@ -53,6 +55,8 @@ export default function Home() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
 
   const visibleProducts = useMemo(
     () => category === "الكل" ? products : products.filter((product) => product.category === category),
@@ -74,8 +78,9 @@ export default function Home() {
       <header className="topbar">
         <div className="nav-actions" dir="ltr">
           <button className="icon-button" aria-label="تسجيل الدخول" title="الحساب"><UserRound size={18} /><span className="desktop-label">{language === "AR" ? "حسابي" : "Account"}</span></button>
+          <div className="nav-dropdown-wrap"><button className="icon-button" aria-expanded={sectionsOpen} aria-label="الأقسام" title="الأقسام" onClick={() => setSectionsOpen((value) => !value)}><ListFilter size={18} /><span className="desktop-label">الأقسام</span><ChevronDown size={14} /></button>{sectionsOpen && <div className="nav-dropdown sections-dropdown">{categories.map((item) => <button key={item} onClick={() => { setCategory(item); setSectionsOpen(false); document.getElementById("menu")?.scrollIntoView({ behavior: "smooth" }); }}><span>{item}</span><b>{item === "الكل" ? products.length : products.filter((product) => product.category === item).length}</b></button>)}</div>}</div>
           <button className="icon-button" aria-label="تغيير الوضع" title="تغيير الوضع" onClick={() => setDark((value) => !value)}>{dark ? <Sun size={18} /> : <Moon size={18} />}<span className="desktop-label">{dark ? "نهاري" : "ليلي"}</span></button>
-          <button className="language-button" aria-label="تغيير اللغة" onClick={() => setLanguage((value) => value === "AR" ? "EN" : "AR")}><Globe2 size={16} /><b>{language}</b><span>/</span><span>{language === "AR" ? "EN" : "AR"}</span></button>
+          <div className="nav-dropdown-wrap"><button className="language-button" aria-expanded={languageOpen} aria-label="اختيار اللغة" onClick={() => setLanguageOpen((value) => !value)}><Globe2 size={16} /><b>{language}</b><ChevronDown size={14} /></button>{languageOpen && <div className="nav-dropdown language-dropdown"><button onClick={() => { setLanguage("AR"); setLanguageOpen(false); }}>العربية <span>AR</span></button><button onClick={() => { setLanguage("EN"); setLanguageOpen(false); }}>English <span>EN</span></button></div>}</div>
           <button className="icon-button cart-button" aria-label="السلة" title="السلة" onClick={() => setCartOpen(true)}><ShoppingBag size={19} /><span className="cart-badge">{cartCount}</span><span className="desktop-label">{language === "AR" ? "السلة" : "Cart"}</span></button>
           <button className="icon-button mobile-menu-button" aria-label="القائمة" onClick={() => setMenuOpen((value) => !value)}><Menu size={20} /></button>
         </div>
@@ -129,4 +134,3 @@ export default function Home() {
     </main>
   );
 }
-
