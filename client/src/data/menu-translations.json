@@ -1,0 +1,542 @@
+{
+  "43": {
+    "nameEn": "Grape Leaves",
+    "descriptionEn": "Grape Leaves"
+  },
+  "44": {
+    "nameEn": "Cheese Sambousek (5 pieces)",
+    "descriptionEn": "Cheese Sambousek (5 pieces)"
+  },
+  "45": {
+    "nameEn": "Meat Sambousek (5 pieces)",
+    "descriptionEn": "Meat Sambousek (5 pieces)"
+  },
+  "46": {
+    "nameEn": "Kibbeh (5 pieces)",
+    "descriptionEn": "Kibbeh (5 pieces)"
+  },
+  "47": {
+    "nameEn": "Hummus",
+    "descriptionEn": "Hummus"
+  },
+  "48": {
+    "nameEn": "Coriander Potatoes",
+    "descriptionEn": "Coriander Potatoes"
+  },
+  "49": {
+    "nameEn": "Nachos",
+    "descriptionEn": "Toasted tortilla chips topped with beef sauce, diced tomatoes, green onion, jalapeño, cilantro, and cheddar cheese sauce, served with sriracha."
+  },
+  "50": {
+    "nameEn": "Eggplant Mutabbal",
+    "descriptionEn": "Eggplant Mutabbal"
+  },
+  "51": {
+    "nameEn": "Hummus with Meat",
+    "descriptionEn": "Hummus with Meat"
+  },
+  "52": {
+    "nameEn": "Chicken Tacos",
+    "descriptionEn": "Chicken Tacos"
+  },
+  "53": {
+    "nameEn": "French Fries",
+    "descriptionEn": "French Fries"
+  },
+  "75": {
+    "nameEn": "Chicken Escalope",
+    "descriptionEn": "Chicken Escalope"
+  },
+  "76": {
+    "nameEn": "Grilled Chicken",
+    "descriptionEn": "Grilled Chicken"
+  },
+  "77": {
+    "nameEn": "Tenderloin Steak",
+    "descriptionEn": "Tenderloin Steak"
+  },
+  "78": {
+    "nameEn": "Grilled Salmon",
+    "descriptionEn": "Grilled Salmon"
+  },
+  "147": {
+    "nameEn": "Lentil Soup",
+    "descriptionEn": "Lentil Soup"
+  },
+  "148": {
+    "nameEn": "Chicken and Mushroom Soup",
+    "descriptionEn": "Chicken and Mushroom Soup"
+  },
+  "2023": {
+    "nameEn": "Al Masaa Burger",
+    "descriptionEn": "Al Masaa Burger"
+  },
+  "55": {
+    "nameEn": "Chicken Burger",
+    "descriptionEn": "Chicken Burger"
+  },
+  "56": {
+    "nameEn": "Beef Burger",
+    "descriptionEn": "Beef Burger"
+  },
+  "57": {
+    "nameEn": "Fajita",
+    "descriptionEn": "Fajita"
+  },
+  "58": {
+    "nameEn": "Club Sandwich",
+    "descriptionEn": "Club Sandwich"
+  },
+  "59": {
+    "nameEn": "Halloumi Sandwich",
+    "descriptionEn": "Halloumi Sandwich"
+  },
+  "79": {
+    "nameEn": "Mini Beef Burger",
+    "descriptionEn": "Mini Beef Burger"
+  },
+  "80": {
+    "nameEn": "Mini Chicken Burger",
+    "descriptionEn": "Mini Chicken Burger"
+  },
+  "81": {
+    "nameEn": "Crispy Chicken",
+    "descriptionEn": "Crispy Chicken"
+  },
+  "125": {
+    "nameEn": "Mango",
+    "descriptionEn": "Mango"
+  },
+  "126": {
+    "nameEn": "Mint Lemonade",
+    "descriptionEn": "Mint Lemonade"
+  },
+  "509": {
+    "nameEn": "Orange Juice",
+    "descriptionEn": "Orange Juice"
+  },
+  "127": {
+    "nameEn": "Piña Colada",
+    "descriptionEn": "Piña Colada"
+  },
+  "128": {
+    "nameEn": "Strawberry Juice",
+    "descriptionEn": "Strawberry Juice"
+  },
+  "510": {
+    "nameEn": "Tropicano",
+    "descriptionEn": "Tropicano"
+  },
+  "129": {
+    "nameEn": "Al Masaa Juice",
+    "descriptionEn": "Al Masaa Juice"
+  },
+  "2106": {
+    "nameEn": "Pineapple Juice",
+    "descriptionEn": "Pineapple Juice"
+  },
+  "2107": {
+    "nameEn": "Banana Milkshake",
+    "descriptionEn": "Banana Milkshake"
+  },
+  "5": {
+    "nameEn": "Chicken Caesar Salad",
+    "descriptionEn": "Lettuce, iceberg, Parmesan cheese, croutons, and chicken breast pieces with Caesar dressing."
+  },
+  "6": {
+    "nameEn": "Fattoush",
+    "descriptionEn": "Lettuce, tomatoes, cucumber, radish, purslane, green pepper, and croutons with pomegranate molasses dressing."
+  },
+  "7": {
+    "nameEn": "Tabbouleh",
+    "descriptionEn": "Chopped parsley, tomatoes, onion, and lemon dressing with bulgur or quinoa."
+  },
+  "66": {
+    "nameEn": "Chicken Pesto Pasta",
+    "descriptionEn": "Chicken Pesto Pasta"
+  },
+  "67": {
+    "nameEn": "Fettuccine Alfredo",
+    "descriptionEn": "Fettuccine Alfredo"
+  },
+  "68": {
+    "nameEn": "Bolognese Linguine",
+    "descriptionEn": "Bolognese Linguine"
+  },
+  "69": {
+    "nameEn": "Margherita Pizza",
+    "descriptionEn": "Margherita Pizza"
+  },
+  "70": {
+    "nameEn": "Pepperoni Pizza",
+    "descriptionEn": "Pepperoni Pizza"
+  },
+  "71": {
+    "nameEn": "Vegetable Pizza",
+    "descriptionEn": "Vegetable Pizza"
+  },
+  "72": {
+    "nameEn": "Pesto Pizza",
+    "descriptionEn": "Pesto Pizza"
+  },
+  "73": {
+    "nameEn": "Chicken Ranch Pizza",
+    "descriptionEn": "Chicken Ranch Pizza"
+  },
+  "74": {
+    "nameEn": "Al Masaa Pizza",
+    "descriptionEn": "Al Masaa Pizza"
+  },
+  "82": {
+    "nameEn": "Date Cake",
+    "descriptionEn": "Date Cake"
+  },
+  "83": {
+    "nameEn": "Mini Pancakes",
+    "descriptionEn": "Mini Pancakes"
+  },
+  "84": {
+    "nameEn": "Molten Cake",
+    "descriptionEn": "Molten Cake"
+  },
+  "85": {
+    "nameEn": "Tiramisu",
+    "descriptionEn": "Tiramisu"
+  },
+  "86": {
+    "nameEn": "Red Velvet Cake",
+    "descriptionEn": "Red Velvet Cake"
+  },
+  "87": {
+    "nameEn": "Chocolate Crepe",
+    "descriptionEn": "Chocolate Crepe"
+  },
+  "88": {
+    "nameEn": "Chocolate Cake",
+    "descriptionEn": "Chocolate Cake"
+  },
+  "89": {
+    "nameEn": "Strawberry Cheesecake",
+    "descriptionEn": "Strawberry Cheesecake"
+  },
+  "90": {
+    "nameEn": "Nutella San Sebastian Cheesecake",
+    "descriptionEn": "Nutella San Sebastian Cheesecake"
+  },
+  "91": {
+    "nameEn": "Mixed Ice Cream",
+    "descriptionEn": "Mixed Ice Cream"
+  },
+  "92": {
+    "nameEn": "Single Scoop Ice Cream",
+    "descriptionEn": "Single Scoop Ice Cream"
+  },
+  "93": {
+    "nameEn": "Large Saudi Coffee Pot",
+    "descriptionEn": "Large Saudi Coffee Pot"
+  },
+  "94": {
+    "nameEn": "Small Saudi Coffee Pot",
+    "descriptionEn": "Small Saudi Coffee Pot"
+  },
+  "95": {
+    "nameEn": "Small Turkish Coffee",
+    "descriptionEn": "Small Turkish Coffee"
+  },
+  "96": {
+    "nameEn": "Double Turkish Coffee",
+    "descriptionEn": "Double Turkish Coffee"
+  },
+  "97": {
+    "nameEn": "Tea Cup (Red or Green Tea)",
+    "descriptionEn": "Tea Cup (Red or Green Tea)"
+  },
+  "98": {
+    "nameEn": "Tea Pot (Red or Green Tea)",
+    "descriptionEn": "Tea Pot (Red or Green Tea)"
+  },
+  "99": {
+    "nameEn": "Karak Tea Cup",
+    "descriptionEn": "Karak Tea Cup"
+  },
+  "100": {
+    "nameEn": "Karak Tea Pot",
+    "descriptionEn": "Karak Tea Pot"
+  },
+  "101": {
+    "nameEn": "Moroccan Tea Cup",
+    "descriptionEn": "Moroccan Tea Cup"
+  },
+  "102": {
+    "nameEn": "Moroccan Tea Pot",
+    "descriptionEn": "Moroccan Tea Pot"
+  },
+  "103": {
+    "nameEn": "Al Masaa Tea Pot",
+    "descriptionEn": "Al Masaa Tea Pot"
+  },
+  "105": {
+    "nameEn": "Ginger Lemon Tea",
+    "descriptionEn": "Ginger Lemon Tea"
+  },
+  "107": {
+    "nameEn": "Soft Drinks",
+    "descriptionEn": "Soft Drinks"
+  },
+  "108": {
+    "nameEn": "Mineral Water",
+    "descriptionEn": "Mineral Water"
+  },
+  "109": {
+    "nameEn": "Sparkling Water",
+    "descriptionEn": "Sparkling Water"
+  },
+  "110": {
+    "nameEn": "Red Bull",
+    "descriptionEn": "Red Bull"
+  },
+  "111": {
+    "nameEn": "Code Red",
+    "descriptionEn": "Code Red"
+  },
+  "112": {
+    "nameEn": "Frappuccino",
+    "descriptionEn": "Frappuccino"
+  },
+  "113": {
+    "nameEn": "Mocha Frappuccino",
+    "descriptionEn": "Mocha Frappuccino"
+  },
+  "114": {
+    "nameEn": "Nutella Frappuccino",
+    "descriptionEn": "Nutella Frappuccino"
+  },
+  "115": {
+    "nameEn": "Milkshake",
+    "descriptionEn": "Milkshake"
+  },
+  "116": {
+    "nameEn": "Al Masaa Shake",
+    "descriptionEn": "Al Masaa Shake"
+  },
+  "117": {
+    "nameEn": "Snickers Shake",
+    "descriptionEn": "Snickers Shake"
+  },
+  "508": {
+    "nameEn": "Nutella Frappuccino",
+    "descriptionEn": "Nutella Frappuccino"
+  },
+  "118": {
+    "nameEn": "Classic Mojito",
+    "descriptionEn": "Classic Mojito"
+  },
+  "119": {
+    "nameEn": "Blue Ocean",
+    "descriptionEn": "Blue Ocean"
+  },
+  "120": {
+    "nameEn": "Cool Mint",
+    "descriptionEn": "Cool Mint"
+  },
+  "121": {
+    "nameEn": "Jamaica",
+    "descriptionEn": "Jamaica"
+  },
+  "122": {
+    "nameEn": "Red Carpet Mojito",
+    "descriptionEn": "Red Carpet Mojito"
+  },
+  "123": {
+    "nameEn": "Moonlight Mojito",
+    "descriptionEn": "Moonlight Mojito"
+  },
+  "124": {
+    "nameEn": "Pink Margarita",
+    "descriptionEn": "Pink Margarita"
+  },
+  "1872": {
+    "nameEn": "Iced Matcha",
+    "descriptionEn": "Iced Matcha"
+  },
+  "1873": {
+    "nameEn": "Iced Spanish Latte",
+    "descriptionEn": ""
+  },
+  "1874": {
+    "nameEn": "Iced Black Coffee",
+    "descriptionEn": ""
+  },
+  "1875": {
+    "nameEn": "Iced Latte",
+    "descriptionEn": ""
+  },
+  "1876": {
+    "nameEn": "Iced Salted Caramel Latte",
+    "descriptionEn": ""
+  },
+  "1877": {
+    "nameEn": "Iced Caramel Macchiato",
+    "descriptionEn": ""
+  },
+  "1878": {
+    "nameEn": "Iced Pistachio Latte",
+    "descriptionEn": ""
+  },
+  "1879": {
+    "nameEn": "Iced Tea",
+    "descriptionEn": ""
+  },
+  "1889": {
+    "nameEn": "Mineral Water",
+    "descriptionEn": ""
+  },
+  "130": {
+    "nameEn": "Single Espresso",
+    "descriptionEn": "Single Espresso"
+  },
+  "131": {
+    "nameEn": "Double Espresso",
+    "descriptionEn": "Double Espresso"
+  },
+  "133": {
+    "nameEn": "Americano",
+    "descriptionEn": "Americano"
+  },
+  "134": {
+    "nameEn": "American Coffee",
+    "descriptionEn": "American Coffee"
+  },
+  "135": {
+    "nameEn": "Hot Chocolate",
+    "descriptionEn": "Hot Chocolate"
+  },
+  "132": {
+    "nameEn": "Cappuccino",
+    "descriptionEn": "Cappuccino"
+  },
+  "136": {
+    "nameEn": "Classic Latte",
+    "descriptionEn": "Classic Latte"
+  },
+  "144": {
+    "nameEn": "Caramel Macchiato",
+    "descriptionEn": "Caramel Macchiato"
+  },
+  "137": {
+    "nameEn": "Spanish Latte",
+    "descriptionEn": "Spanish Latte"
+  },
+  "138": {
+    "nameEn": "Flat White",
+    "descriptionEn": "Flat White"
+  },
+  "139": {
+    "nameEn": "Hot Mocha",
+    "descriptionEn": "Hot Mocha"
+  },
+  "140": {
+    "nameEn": "White Mocha",
+    "descriptionEn": "White Mocha"
+  },
+  "141": {
+    "nameEn": "French Latte",
+    "descriptionEn": "French Latte"
+  },
+  "142": {
+    "nameEn": "Caramel Cappuccino",
+    "descriptionEn": "Caramel Cappuccino"
+  },
+  "143": {
+    "nameEn": "Hot Pistachio Latte",
+    "descriptionEn": "Hot Pistachio Latte"
+  },
+  "145": {
+    "nameEn": "Hot Macchiato",
+    "descriptionEn": "Hot Macchiato"
+  },
+  "146": {
+    "nameEn": "Matcha — Hot or Iced",
+    "descriptionEn": "Matcha — Hot or Iced"
+  },
+  "1819": {
+    "nameEn": "Al Masaa One Package",
+    "descriptionEn": "Al Masaa One Package"
+  },
+  "1820": {
+    "nameEn": "Al Masaa Events Package",
+    "descriptionEn": "Al Masaa Events Package"
+  },
+  "1822": {
+    "nameEn": "Al Masaa Now Package",
+    "descriptionEn": "Al Masaa Now Package"
+  },
+  "1848": {
+    "nameEn": "Luxury Apple Shisha",
+    "descriptionEn": "Our best-selling shisha flavor: a bold double-apple taste."
+  },
+  "1849": {
+    "nameEn": "Nakhlah Apple Shisha",
+    "descriptionEn": "A bold traditional apple flavor for those who enjoy a strong taste."
+  },
+  "1850": {
+    "nameEn": "Mixed Apple Shisha",
+    "descriptionEn": "A distinctive blend of Luxury Apple and Nakhlah Apple flavors."
+  },
+  "1851": {
+    "nameEn": "Lemon Mint Shisha",
+    "descriptionEn": "A light, refreshing flavor reminiscent of menthol."
+  },
+  "1852": {
+    "nameEn": "Grape Mint Shisha",
+    "descriptionEn": "Sweet grape with a refreshing touch of mint."
+  },
+  "1853": {
+    "nameEn": "Grape Berry Shisha",
+    "descriptionEn": "A light, balanced flavor for a smooth experience."
+  },
+  "1854": {
+    "nameEn": "Plain Grape Shisha",
+    "descriptionEn": "Pure grape flavor with an unforgettable taste."
+  },
+  "1855": {
+    "nameEn": "Plain Mint Shisha",
+    "descriptionEn": "Cool, refreshing mint flavor."
+  },
+  "1856": {
+    "nameEn": "Blueberry Shisha",
+    "descriptionEn": "A beautifully balanced blueberry flavor."
+  },
+  "1857": {
+    "nameEn": "Cinnamon Gum Shisha",
+    "descriptionEn": "A distinctive bubble-gum flavor with a hint of cinnamon."
+  },
+  "1858": {
+    "nameEn": "Mastic Shisha",
+    "descriptionEn": "Premium mastic flavor with a rich, pleasant taste."
+  },
+  "1859": {
+    "nameEn": "Love Shisha",
+    "descriptionEn": "One of our finest signature flavors."
+  },
+  "1861": {
+    "nameEn": "Peach Shisha",
+    "descriptionEn": "Light, pleasant peach flavor."
+  },
+  "1862": {
+    "nameEn": "Mint Gum Shisha",
+    "descriptionEn": "A refreshing blend of bubble gum and mint."
+  },
+  "1863": {
+    "nameEn": "Watermelon Mint Shisha",
+    "descriptionEn": "Refreshing watermelon flavor, rich in taste."
+  },
+  "1865": {
+    "nameEn": "Shisha Head Change",
+    "descriptionEn": "Shisha head replacement service."
+  },
+  "1866": {
+    "nameEn": "New Hose / Pipe",
+    "descriptionEn": "A new, individually wrapped hose or pipe."
+  }
+}
