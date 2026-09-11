@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { menuSections, products as sourceProducts } from "@/data/menu";
 import { useLocation } from "wouter";
 import {
   ChevronLeft,
+  ChevronRight,
   ChevronDown,
   Globe2,
   Instagram,
@@ -54,6 +55,7 @@ export default function Home() {
   const [languageOpen, setLanguageOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSent, setBookingSent] = useState(false);
+  const categoryBarRef = useRef<HTMLDivElement>(null);
   const tr = (ar: string, en: string, fr: string) => language === "AR" ? ar : language === "FR" ? fr : en;
   const categoryLabel = (item: string) => language === "AR" ? item : language === "FR" ? categoryFrench[item] : categoryEnglish[item];
 
@@ -71,6 +73,7 @@ export default function Home() {
     if ((next[id] || 0) <= 1) delete next[id]; else next[id] -= 1;
     return next;
   });
+  const scrollCategories = (direction: 1 | -1) => categoryBarRef.current?.scrollBy({ left: direction * (language === "AR" ? -280 : 280), behavior: "smooth" });
 
   return (
     <main className={`site-shell ${dark ? "theme-dark" : "theme-light"}`} dir={language === "AR" ? "rtl" : "ltr"}>
@@ -111,12 +114,16 @@ export default function Home() {
       </section>
 
       <section className="menu-section" id="menu">
+        <div className="category-nav-shell">
+          <button className="category-arrow" onClick={() => scrollCategories(-1)} aria-label={tr("الأقسام السابقة", "Previous sections", "Catégories précédentes")}><ChevronRight size={19} /></button>
+          <div className="category-bar" ref={categoryBarRef} role="tablist" dir={language === "AR" ? "rtl" : "ltr"}>
+            {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)} role="tab" aria-selected={category === item}>{categoryLabel(item)}</button>)}
+          </div>
+          <button className="category-arrow" onClick={() => scrollCategories(1)} aria-label={tr("الأقسام التالية", "Next sections", "Catégories suivantes")}><ChevronLeft size={19} /></button>
+        </div>
         <div className="section-heading">
           <div><p className="eyebrow accent">{tr("اختياراتنا", "Our selection", "Notre sélection")}</p><h2>{tr("منيو مساء", "Masaa menu", "Menu Masaa")}</h2></div>
           <p className="section-note">{tr("كل ما تحبه، في مكان واحد", "Everything you love, in one place", "Tout ce que vous aimez, au même endroit")}</p>
-        </div>
-        <div className="category-bar" role="tablist">
-          {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)} role="tab" aria-selected={category === item}>{categoryLabel(item)}</button>)}
         </div>
         <div className="product-grid">
           {visibleProducts.map((product, index) => (
