@@ -5,7 +5,7 @@
     "license":  "MIT",
     "scripts":  {
                     "dev":  "NODE_ENV=development tsx watch server/_core/index.ts",
-                    "build":  "node node_modules/vite/bin/vite.js build \u0026\u0026 node node_modules/esbuild/bin/esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+                    "build":  "vite build \u0026\u0026 esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
                     "start":  "NODE_ENV=production node dist/index.js",
                     "check":  "tsc --noEmit",
                     "format":  "prettier --write .",
