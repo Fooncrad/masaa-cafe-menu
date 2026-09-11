@@ -179,3 +179,5 @@ footer { border-top: 1px solid var(--line); padding: 34px clamp(18px, 4vw, 64px)
 .category-separator::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent)); }
 .category-separator small { display: grid; place-items: center; min-width: 24px; height: 20px; padding: 0 6px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-size: 10px; }
 @media (max-width: 700px) { .category-separator { margin-top: 7px; font-size: 13px; } }
+
+.mobile-menu-button.is-open { background: var(--accent); color: #fff; border-color: var(--accent); }

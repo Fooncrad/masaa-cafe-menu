@@ -16,7 +16,6 @@ import {
   MessageCircle,
   Play,
   Minus,
-  ListFilter,
   CalendarDays,
   Clock3,
 } from "lucide-react";
@@ -47,7 +46,6 @@ export default function Home() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sectionsOpen, setSectionsOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSent, setBookingSent] = useState(false);
@@ -72,11 +70,10 @@ export default function Home() {
       <header className="topbar">
         <div className="nav-actions" dir="ltr">
           <button className="icon-button" aria-label="تسجيل الدخول" title="الحساب"><UserRound size={18} /><span className="desktop-label">{language === "AR" ? "حسابي" : "Account"}</span></button>
-          <div className="nav-dropdown-wrap"><button className="icon-button" aria-expanded={sectionsOpen} aria-label="الأقسام" title="الأقسام" onClick={() => setSectionsOpen((value) => !value)}><ListFilter size={18} /><span className="desktop-label">{language === "AR" ? "الأقسام" : "Sections"}</span><ChevronDown size={14} /></button>{sectionsOpen && <div className="nav-dropdown sections-dropdown">{categories.map((item) => <button key={item} onClick={() => { setCategory(item); setSectionsOpen(false); document.getElementById("menu")?.scrollIntoView({ behavior: "smooth" }); }}><span>{language === "AR" ? item : categoryEnglish[item]}</span><b>{item === "الكل" ? products.length : products.filter((product) => product.category === item).length}</b></button>)}</div>}</div>
           <button className="icon-button" aria-label="تغيير الوضع" title="تغيير الوضع" onClick={() => setDark((value) => !value)}>{dark ? <Sun size={18} /> : <Moon size={18} />}<span className="desktop-label">{dark ? "نهاري" : "ليلي"}</span></button>
           <div className="nav-dropdown-wrap"><button className="language-button" aria-expanded={languageOpen} aria-label="اختيار اللغة" onClick={() => setLanguageOpen((value) => !value)}><Globe2 size={16} /><b>{language}</b><ChevronDown size={14} /></button>{languageOpen && <div className="nav-dropdown language-dropdown"><button onClick={() => { setLanguage("AR"); setLanguageOpen(false); }}>العربية <span>AR</span></button><button onClick={() => { setLanguage("EN"); setLanguageOpen(false); }}>English <span>EN</span></button></div>}</div>
           <button className="icon-button cart-button" aria-label="السلة" title="السلة" onClick={() => setCartOpen(true)}><ShoppingBag size={19} /><span className="cart-badge">{cartCount}</span><span className="desktop-label">{language === "AR" ? "السلة" : "Cart"}</span></button>
-          <button className="icon-button mobile-menu-button" aria-label="القائمة" onClick={() => setMenuOpen((value) => !value)}><Menu size={20} /></button>
+          <button className={`icon-button mobile-menu-button ${menuOpen ? "is-open" : ""}`} aria-label={menuOpen ? "إغلاق القائمة" : "فتح القائمة"} title={menuOpen ? "إغلاق" : "القائمة"} onClick={() => setMenuOpen((value) => !value)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button>
         </div>
         <div className={`mobile-menu ${menuOpen ? "is-open" : ""}`}>
           <div className="mobile-menu-section"><b>{language === "AR" ? "الأقسام" : "Sections"}</b>{categories.map((item) => <button key={item} onClick={() => { setCategory(item); setMenuOpen(false); document.getElementById("menu")?.scrollIntoView({ behavior: "smooth" }); }}><span>{language === "AR" ? item : categoryEnglish[item]}</span><small>{item === "الكل" ? products.length : products.filter((product) => product.category === item).length}</small></button>)}</div>
