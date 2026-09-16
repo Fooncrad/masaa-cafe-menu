@@ -128,7 +128,7 @@ function AppContent() {
 
 const RESTAURANT_AREA_ROLES = new Set(["restaurant_admin", "waiter", "driver", "cashier", "kitchen", "bar", "restaurant"]);
 function CustomerAreaGuard({ children }: { children: ReactNode }) { const { user, loading } = useAuth(); const [, navigate] = useLocation(); const role = String(user?.testRole ?? user?.role ?? ""); const blocked = Boolean(user && RESTAURANT_AREA_ROLES.has(role)); useEffect(() => { if (blocked) navigate("/restaurant/dashboard"); }, [blocked, navigate]); if (loading || blocked) return <PageLoading />; return <>{children}</>; }
-function RootRoute() { const { user, loading } = useAuth(); if (loading) return <PageLoading />; return user ? <Home /> : <PublicHome />; }
+function RootRoute() { const { user, loading } = useAuth(); if (loading) return <PageLoading />; return user ? <Home /> : <MasaaCafesDemo />; }
 function LegacyStoresRoute() { const [, navigate] = useLocation(); useEffect(() => { navigate("/marketplace", { replace: true }); }, [navigate]); return <PageLoading />; }
 
 function Router() {
