@@ -1,0 +1,42 @@
+export type DashboardNavKey = "overview" | "admin" | "accounts" | "settings" | "operations" | "languages" | "files" | "trend" | "branches" | "orders" | "pos" | "printers" | "kds" | "menu" | "tables" | "qr" | "inventory" | "team" | "marketing" | "storefront" | "reservations" | "remote" | "security" | "health";
+
+export type DashboardRole = "admin" | "restaurant_admin" | "waiter" | "kitchen" | "bar" | "cashier" | "customer" | "driver";
+export type DashboardAction = "orders.create" | "orders.status.update" | "inventory.manage" | "marketing.manage" | "reservations.create";
+
+export const roleActions: Record<DashboardRole, DashboardAction[]> = {
+  admin: [],
+  restaurant_admin: ["orders.create", "orders.status.update", "inventory.manage", "marketing.manage", "reservations.create"],
+  waiter: ["orders.create", "reservations.create"],
+  kitchen: ["orders.status.update"],
+  bar: ["orders.status.update"],
+  cashier: ["orders.create", "orders.status.update"],
+  customer: [],
+  driver: [],
+};
+
+export const roleNavigation: Record<DashboardRole, DashboardNavKey[]> = {
+  admin: ["overview", "admin", "accounts", "settings", "languages", "files", "trend", "security", "health"],
+  restaurant_admin: ["overview", "settings", "branches", "orders", "pos", "printers", "kds", "menu", "tables", "inventory", "team", "marketing", "storefront", "reservations", "remote", "languages", "files", "trend", "security"],
+  waiter: ["overview", "orders", "tables", "reservations", "remote", "files", "trend", "security"],
+  kitchen: ["overview", "kds", "files", "trend", "security"],
+  bar: ["overview", "kds", "files", "trend", "security"],
+  cashier: ["overview", "pos", "orders", "tables", "files", "trend", "security"],
+  customer: ["overview", "orders", "reservations", "files", "trend", "security"],
+  driver: ["overview", "orders", "remote", "files", "trend", "security"],
+};
+
+export function getVisibleNavigation(role: DashboardRole | string | undefined, isCentralAdmin = false): DashboardNavKey[] {
+  if (isCentralAdmin || role === "admin") return ["overview", "admin", "accounts", "settings", "languages", "files", "trend", "security", "health"];
+  if (!role || !(role in roleNavigation)) return ["overview"];
+  return roleNavigation[role as DashboardRole];
+}
+
+export function isRoleNavigationAllowed(role: DashboardRole | undefined, key: DashboardNavKey): boolean {
+  if (!role) return false;
+  return roleNavigation[role].includes(key);
+}
+
+export function isRoleActionAllowed(role: DashboardRole | undefined, action: DashboardAction): boolean {
+  if (!role) return false;
+  return roleActions[role].includes(action);
+}

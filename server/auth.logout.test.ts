@@ -42,6 +42,15 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
 }
 
 describe("auth.logout", () => {
+  it("logs the central admin test account with the admin role", async () => {
+    const ctx = {
+      user: null,
+      req: { protocol: "https", headers: {}, get: () => undefined, ip: "127.0.0.1" },
+      res: { cookie: () => undefined, clearCookie: () => undefined },
+    } as unknown as TrpcContext;
+    const result = await appRouter.createCaller(ctx).auth.testLogin({ email: "fooncards@gmail.com", password: "123456" });
+    expect(result).toEqual(expect.objectContaining({ success: true, role: "admin" }));
+  });
   it("clears the session cookie and reports success", async () => {
     const { ctx, clearedCookies } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
@@ -49,14 +58,35 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(1);
-    expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
+    expect(clearedCookies).toHaveLength(2);
+    expect(clearedCookies.map((cookie) => cookie.name)).toEqual(expect.arrayContaining([COOKIE_NAME, "nfood_test_session"]));
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
       sameSite: "none",
       httpOnly: true,
       path: "/",
+    });
+  });
+
+  it("writes test-login cookies with the shared cross-site session policy", async () => {
+    const cookieCalls: CookieCall[] = [];
+    const ctx = {
+      user: null,
+      req: { protocol: "https", headers: {}, get: () => undefined, ip: "127.0.0.1" },
+      res: {
+        cookie: (name: string, _value: string, options: Record<string, unknown>) => cookieCalls.push({ name, options }),
+        clearCookie: () => undefined,
+      },
+    } as unknown as TrpcContext;
+
+    const result = await appRouter.createCaller(ctx).auth.testLogin({ email: "fooncards@gmail.com", password: "123456" });
+
+    expect(result).toEqual(expect.objectContaining({ success: true, role: "admin" }));
+    expect(cookieCalls).toHaveLength(1);
+    expect(cookieCalls[0]).toMatchObject({
+      name: "nfood_test_session",
+      options: { secure: true, sameSite: "none", httpOnly: true, path: "/" },
     });
   });
 });

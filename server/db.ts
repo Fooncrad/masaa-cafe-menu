@@ -1,92 +1,1353 @@
-import { eq } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, isNotNull, lte, like, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import { nanoid } from "nanoid";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
+import { InsertUser, branches, employees, inventoryItems, menuCategories, menuItems, orderItems, orders, kitchenSections, restaurants, users, subscriptions, roles, permissions, restaurantTables, purchases, attendance, campaigns, coupons, remoteWorkers, remoteTasks, taskMessages, notifications, testAccounts, authSessions, userSecurity, featureDefinitions, restaurantFeatures, packagePlans, packagePlanFeatures, auditLogs, platformSettings, integrationSettings, loyaltyAccounts, loyaltyTransactions, walletAccounts, walletTopupRequests, walletTransactions, referralRecords, customerProfiles, supportAgents, supportTickets, restaurantMembers, apiWebhooks, vcardCardProducts, vcardCardOrders, vcardCardCodes, vcardCardBindings, mediaFiles, mediaFolders, translationErrorLogs, translationGlossaryEntries, translationJobs, translationJobErrors, deliveryZones, pickupPoints, reservationSlots, reservations, userPreferences, favoriteMenuItems, restaurantDisplayScreens, restaurantDisplaySlides, campaignContents, contentListings, contentPurchaseOrders, contentPurchaseEntitlements, contentModerationReviews, commerceFundingAccounts, favoriteRestaurants, waiterTableAssignments, contentFoodTags, contentListingInvites, uiTranslationEntries, uiTranslationHistory, receiptTemplates, kitchenSectionSla, orderStatusHistory, menuItemAddons, seatingSections, qrCodes, guestOrderClaimOtps, hotels, hotelRooms, featureRequests, trustedDevices, customerCardRequests, customerBenefitFeatures, customerBenefitPlans, customerBenefitPlanFeatures, customerBenefitSubscriptions, customerBenefitRequests, whiteLabelWorkspaces, restaurantMenuLayoutTemplates, waiterCalls, reservationBlackoutDates } from "../drizzle/schema";
+import { ENV } from "./_core/env";
+import { driverSecurityDeposits, driverSecurityDepositTransactions, financialLedgerEntries } from "../drizzle/schema";
+import { normalizeMenuTemplateSchedule, resolveActiveMenuTemplate } from "../shared/menuTemplateSchedule";
+import { sendPushToUser } from "./push";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+    try { _db = drizzle(process.env.DATABASE_URL); } catch (error) { console.warn("[Database] Failed to connect:", error); _db = null; }
   }
   return _db;
 }
 
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
+export const PLATFORM_SETTING_KEYS = ["supportEmail", "supportPhone", "defaultCurrency", "defaultTimezone", "baseDomain", "maintenanceMode", "allowGuestCheckout", "allowCustomerContentPurchase", "allowRestaurantContentPurchase", "siteLanguage", "availableLanguages", "country", "siteName", "siteLogoUrl", "socialLinks", "copyrightYear", "currencyDisplayMode", "numberFormat", "pricingLayout", "analyticsId", "facebookPixelId", "siteDescription", "homepageContent", "termsOfService", "privacyPolicy", "refundPolicy", "subscriptionTaxRate", "taxNumber", "companyDetails", "bankAccountName", "bankName", "bankAccountNumber", "bankTransferInstructions", "vcardEnabledRoles", "profileCustomerEnabled", "profileRestaurantEnabled", "profileDriverEnabled", "profilePlansJson", "profileAccountOverridesJson", "referralReferrerPoints", "referralReferredPoints", "contentImagePrice", "customerStudioLimitBytes", "sectorGovernanceJson", "seoTitle", "seoDescription", "seoKeywords", "seoHashtags", "seoImageUrl", "seoCanonicalUrl", "seoRobots", "googleSearchConsoleVerification", "googleAnalyticsMeasurementId", "googleTagManagerId", "structuredDataJson", "translateWidgetCode"] as const;
+export const LOYALTY_TIERS = [
+  { key: "standard", label: "Standard", minPoints: 0 },
+  { key: "silver", label: "Silver", minPoints: 500 },
+  { key: "gold", label: "Gold", minPoints: 1000 },
+] as const;
+export type LoyaltyTier = typeof LOYALTY_TIERS[number]["key"];
+export function getLoyaltyTier(points: number): LoyaltyTier {
+  const safePoints = Math.max(0, points);
+  return safePoints >= 1000 ? "gold" : safePoints >= 500 ? "silver" : "standard";
+}
+export type PlatformSettingKey = typeof PLATFORM_SETTING_KEYS[number];
 
+export async function getEffectiveIntegrationSecret(restaurantId: number, providerKey: string) {
+  const db = await getDb(); if (!db) return null;
+  const restaurant = (await db.select({ integrationMode: restaurants.integrationMode, plan: restaurants.plan }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1))[0];
+  if (!restaurant) return null;
+  const paidProvider = ["otp_sms", "tamara", "stc_pay", "whatsapp_business", "smtp", "google_maps"].includes(providerKey);
+  const eligible = !paidProvider || !["free", "starter"].includes(String(restaurant.plan ?? "Free").toLowerCase());
+  if (!eligible) return null;
+  const scope = restaurant.integrationMode === "custom" ? "restaurant" : "platform";
+  return getIntegrationSecret(scope, providerKey, scope === "restaurant" ? restaurantId : undefined);
+}
+
+export async function listIntegrationSettings(scope: "platform" | "restaurant", restaurantId?: number) {
+  const db = await getDb(); if (!db) return [];
+  const filters = scope === "platform" ? eq(integrationSettings.scope, "platform") : and(eq(integrationSettings.scope, "restaurant"), restaurantId ? eq(integrationSettings.restaurantId, restaurantId) : eq(integrationSettings.restaurantId, 0));
+  return db.select({ id: integrationSettings.id, scope: integrationSettings.scope, restaurantId: integrationSettings.restaurantId, providerKey: integrationSettings.providerKey, category: integrationSettings.category, status: integrationSettings.status, keyReference: integrationSettings.keyReference, updatedByUserId: integrationSettings.updatedByUserId, updatedAt: integrationSettings.updatedAt }).from(integrationSettings).where(filters).orderBy(integrationSettings.category, integrationSettings.providerKey);
+}
+function integrationKey() { return createHash("sha256").update(process.env.JWT_SECRET || "nfood-integration-secret").digest(); }
+export function encryptIntegrationSecret(secret: string) { const iv = randomBytes(12); const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv); const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]); return `${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`; }
+export function decryptIntegrationSecret(value: string) { const [ivPart, tagPart, ciphertextPart] = value.split("."); if (!ivPart || !tagPart || !ciphertextPart) return null; try { const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivPart, "base64url")); decipher.setAuthTag(Buffer.from(tagPart, "base64url")); return Buffer.concat([decipher.update(Buffer.from(ciphertextPart, "base64url")), decipher.final()]).toString("utf8"); } catch { return null; } }
+export async function getIntegrationSecret(scope: "platform" | "restaurant", providerKey: string, restaurantId?: number) { const db = await getDb(); if (!db) return null; const row = (await db.select({ secretCiphertext: integrationSettings.secretCiphertext, status: integrationSettings.status }).from(integrationSettings).where(and(eq(integrationSettings.scope, scope), eq(integrationSettings.providerKey, providerKey), scope === "restaurant" ? eq(integrationSettings.restaurantId, restaurantId ?? 0) : eq(integrationSettings.scope, "platform"))).limit(1))[0]; return row?.status === "configured" && row.secretCiphertext ? decryptIntegrationSecret(row.secretCiphertext) : null; }
+export async function upsertIntegrationSetting(input: { scope: "platform" | "restaurant"; restaurantId?: number; providerKey: string; category: string; status: "not_configured" | "configured" | "disabled"; keyReference?: string | null; secret?: string | null; updatedByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const existing = await db.select({ id: integrationSettings.id }).from(integrationSettings).where(and(eq(integrationSettings.scope, input.scope), eq(integrationSettings.providerKey, input.providerKey), input.scope === "restaurant" ? eq(integrationSettings.restaurantId, input.restaurantId ?? 0) : eq(integrationSettings.scope, "platform"))).limit(1);
+  const encrypted = input.secret?.trim() ? encryptIntegrationSecret(input.secret.trim()) : undefined;
+  if (existing[0]) { await db.update(integrationSettings).set({ category: input.category, status: input.status, keyReference: input.keyReference ?? null, ...(encrypted ? { secretCiphertext: encrypted } : {}), updatedByUserId: input.updatedByUserId, updatedAt: new Date() }).where(eq(integrationSettings.id, existing[0].id)); return existing[0].id; }
+  const result = await db.insert(integrationSettings).values({ scope: input.scope, restaurantId: input.restaurantId ?? null, providerKey: input.providerKey, category: input.category, status: input.status, keyReference: input.keyReference ?? null, secretCiphertext: encrypted ?? null, updatedByUserId: input.updatedByUserId }); return Number(result[0].insertId);
+}
+
+export async function getCustomerProfile(userId: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, userId)).limit(1))[0]; }
+export async function listRestaurantCustomers(restaurantId: number, search?: string) { const db = await getDb(); if (!db) return []; const term = search?.trim().toLowerCase(); const rows = await db.select({ profileId: customerProfiles.id, userId: users.id, restaurantId: customerProfiles.restaurantId, name: users.name, email: users.email, loginMethod: users.loginMethod, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn, phone: customerProfiles.phone }).from(customerProfiles).innerJoin(users, eq(customerProfiles.userId, users.id)).where(eq(customerProfiles.restaurantId, restaurantId)).orderBy(desc(users.createdAt)); return term ? rows.filter((row) => [row.name, row.email, row.phone].some((value) => value?.toLowerCase().includes(term))) : rows; }
+export async function getPublicCustomerProfile(slug: string) { const db = await getDb(); if (!db) return undefined; const profile = (await db.select({ id: customerProfiles.id, slug: customerProfiles.slug, isPublic: customerProfiles.isPublic, displayName: customerProfiles.displayName, title: customerProfiles.title, bio: customerProfiles.bio, avatarUrl: customerProfiles.avatarUrl, coverUrl: customerProfiles.coverUrl, phone: customerProfiles.phone, whatsapp: customerProfiles.whatsapp, email: customerProfiles.email, websiteUrl: customerProfiles.websiteUrl, address: customerProfiles.address, city: customerProfiles.city, instagramUrl: customerProfiles.instagramUrl, twitterUrl: customerProfiles.twitterUrl, facebookUrl: customerProfiles.facebookUrl, linkedinUrl: customerProfiles.linkedinUrl, servicesJson: customerProfiles.servicesJson, productsJson: customerProfiles.productsJson, paymentMethodsJson: customerProfiles.paymentMethodsJson, qrVisualConfigJson: customerProfiles.qrVisualConfigJson }).from(customerProfiles).where(and(eq(customerProfiles.slug, slug), eq(customerProfiles.isPublic, true))).limit(1))[0]; if (!profile) return undefined; let services: Array<{ name: string; description?: string; url?: string }> = []; let products: Array<{ name: string; description?: string; imageUrl?: string; price?: string; currency?: string; type?: string; published?: boolean }> = []; let paymentMethods: Array<{ name: string; label?: string; imageUrl?: string; instructions?: string; enabled?: boolean }> = []; try { services = profile.servicesJson ? JSON.parse(profile.servicesJson) : []; } catch { services = []; } try { products = profile.productsJson ? JSON.parse(profile.productsJson) : []; } catch { products = []; } products = products.filter((product) => product.published !== false); try { paymentMethods = profile.paymentMethodsJson ? JSON.parse(profile.paymentMethodsJson) : []; } catch { paymentMethods = []; } return { ...profile, services, products, paymentMethods }; }
+export async function upsertCustomerProfile(userId: number, input: { restaurantId?: number | null; slug?: string; isPublic?: boolean; displayName?: string | null; title?: string | null; bio?: string | null; avatarUrl?: string | null; coverUrl?: string | null; phone?: string | null; whatsapp?: string | null; email?: string | null; websiteUrl?: string | null; address?: string | null; city?: string | null; instagramUrl?: string | null; twitterUrl?: string | null; facebookUrl?: string | null; linkedinUrl?: string | null; servicesJson?: string | null; productsJson?: string | null; paymentMethodsJson?: string | null; qrVisualConfigJson?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = await getCustomerProfile(userId); if (existing) { await db.update(customerProfiles).set({ ...input, updatedAt: new Date() }).where(eq(customerProfiles.userId, userId)); return existing.id; } const result = await db.insert(customerProfiles).values({ userId, slug: input.slug ?? `customer-${userId}-${nanoid(8)}`, isPublic: input.isPublic ?? false, ...input }); return Number(result[0].insertId); }
+
+export async function listDeliveryZones(restaurantId: number, branchId?: number) { const db = await getDb(); if (!db) return []; return db.select().from(deliveryZones).where(and(eq(deliveryZones.restaurantId, restaurantId), branchId ? or(eq(deliveryZones.branchId, branchId), sql`${deliveryZones.branchId} IS NULL`) : undefined)).orderBy(deliveryZones.name); }
+export async function saveDeliveryZone(input: { id?: number; restaurantId: number; branchId?: number | null; name: string; centerLatitude: number; centerLongitude: number; radiusKm: number; deliveryFee: number; minimumOrder: number; polygonJson?: string | null; isActive: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { restaurantId: input.restaurantId, branchId: input.branchId ?? null, name: input.name, centerLatitude: input.centerLatitude.toFixed(7), centerLongitude: input.centerLongitude.toFixed(7), radiusKm: input.radiusKm.toFixed(2), deliveryFee: input.deliveryFee.toFixed(2), minimumOrder: input.minimumOrder.toFixed(2), polygonJson: input.polygonJson ?? null, isActive: input.isActive }; if (input.id) { await db.update(deliveryZones).set({ ...values, updatedAt: new Date() }).where(and(eq(deliveryZones.id, input.id), eq(deliveryZones.restaurantId, input.restaurantId))); return input.id; } const result = await db.insert(deliveryZones).values(values); return Number(result[0].insertId); }
+export async function deleteDeliveryZone(id: number, restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(deliveryZones).where(and(eq(deliveryZones.id, id), eq(deliveryZones.restaurantId, restaurantId))); }
+export async function listPickupPoints(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; return db.select().from(pickupPoints).where(and(eq(pickupPoints.restaurantId, restaurantId), eq(pickupPoints.branchId, branchId), eq(pickupPoints.isActive, true))).orderBy(pickupPoints.name); }
+export async function listHotelsWithRooms(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; const rows = await db.select({ hotelId: hotels.id, hotelName: hotels.name, hotelCode: hotels.code, roomId: hotelRooms.id, roomNumber: hotelRooms.roomNumber, floor: hotelRooms.floor }).from(hotels).leftJoin(hotelRooms, eq(hotelRooms.hotelId, hotels.id)).where(and(eq(hotels.restaurantId, restaurantId), eq(hotels.branchId, branchId), eq(hotels.status, "active"), or(isNull(hotelRooms.id), eq(hotelRooms.isActive, true)))).orderBy(hotels.name, hotelRooms.roomNumber); const groups = new Map<number, { id: number; name: string; code: string | null; rooms: Array<{ id: number; roomNumber: string; floor: string | null }> }>(); for (const row of rows) { const group = groups.get(row.hotelId) ?? { id: row.hotelId, name: row.hotelName, code: row.hotelCode, rooms: [] }; if (row.roomId !== null) group.rooms.push({ id: row.roomId, roomNumber: row.roomNumber!, floor: row.floor }); groups.set(row.hotelId, group); } return Array.from(groups.values()).filter((hotel) => hotel.rooms.length > 0); }
+export async function getSyncedHotelRoom(input: { restaurantId: number; branchId: number; hotelId: number; roomId: number }) { const db = await getDb(); if (!db) return undefined; return (await db.select({ hotelId: hotels.id, hotelName: hotels.name, hotelCode: hotels.code, roomId: hotelRooms.id, roomNumber: hotelRooms.roomNumber, floor: hotelRooms.floor }).from(hotels).innerJoin(hotelRooms, eq(hotelRooms.hotelId, hotels.id)).where(and(eq(hotels.id, input.hotelId), eq(hotels.restaurantId, input.restaurantId), eq(hotels.branchId, input.branchId), eq(hotels.status, "active"), eq(hotelRooms.id, input.roomId), eq(hotelRooms.isActive, true))).limit(1))[0]; }
+export async function listManagedHotels(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: hotels.id, restaurantId: hotels.restaurantId, branchId: hotels.branchId, name: hotels.name, code: hotels.code, status: hotels.status, roomId: hotelRooms.id, roomNumber: hotelRooms.roomNumber, floor: hotelRooms.floor, roomIsActive: hotelRooms.isActive, lastSyncedAt: hotelRooms.lastSyncedAt }).from(hotels).leftJoin(hotelRooms, eq(hotelRooms.hotelId, hotels.id)).where(and(eq(hotels.restaurantId, restaurantId), eq(hotels.branchId, branchId))).orderBy(hotels.name, hotelRooms.roomNumber); }
+export async function saveManagedHotel(input: { id?: number; restaurantId: number; branchId: number; name: string; code?: string | null; status?: "active" | "inactive" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { restaurantId: input.restaurantId, branchId: input.branchId, name: input.name.trim(), code: input.code?.trim() || null, status: input.status ?? "active" as const }; if (input.id) { await db.update(hotels).set({ name: values.name, code: values.code, status: values.status, updatedAt: new Date() }).where(and(eq(hotels.id, input.id), eq(hotels.restaurantId, input.restaurantId), eq(hotels.branchId, input.branchId))); return input.id; } const result = await db.insert(hotels).values(values); return Number(result[0].insertId); }
+export async function saveManagedHotelRoom(input: { id?: number; hotelId: number; roomNumber: string; floor?: string | null; syncKey?: string | null; isActive?: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { hotelId: input.hotelId, roomNumber: input.roomNumber.trim(), floor: input.floor?.trim() || null, syncKey: input.syncKey?.trim() || null, isActive: input.isActive ?? true, lastSyncedAt: new Date() }; if (input.id) { await db.update(hotelRooms).set({ roomNumber: values.roomNumber, floor: values.floor, syncKey: values.syncKey, isActive: values.isActive, lastSyncedAt: values.lastSyncedAt, updatedAt: new Date() }).where(and(eq(hotelRooms.id, input.id), eq(hotelRooms.hotelId, input.hotelId))); return input.id; } const result = await db.insert(hotelRooms).values(values); return Number(result[0].insertId); }
+export async function setManagedHotelRoomActive(input: { id: number; hotelId: number; isActive: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(hotelRooms).set({ isActive: input.isActive, lastSyncedAt: new Date(), updatedAt: new Date() }).where(and(eq(hotelRooms.id, input.id), eq(hotelRooms.hotelId, input.hotelId))); }
+export async function savePickupPoint(input: { id?: number; restaurantId: number; branchId: number; name: string; address?: string | null; openingTime?: string | null; closingTime?: string | null; isActive: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { restaurantId: input.restaurantId, branchId: input.branchId, name: input.name, address: input.address ?? null, openingTime: input.openingTime ?? null, closingTime: input.closingTime ?? null, isActive: input.isActive }; if (input.id) { await db.update(pickupPoints).set({ ...values, updatedAt: new Date() }).where(and(eq(pickupPoints.id, input.id), eq(pickupPoints.restaurantId, input.restaurantId))); return input.id; } const result = await db.insert(pickupPoints).values(values); return Number(result[0].insertId); }
+export async function deletePickupPoint(id: number, restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(pickupPoints).where(and(eq(pickupPoints.id, id), eq(pickupPoints.restaurantId, restaurantId))); }
+export async function listReservationSlots(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; return db.select().from(reservationSlots).where(and(eq(reservationSlots.restaurantId, restaurantId), eq(reservationSlots.branchId, branchId), eq(reservationSlots.isActive, true))).orderBy(reservationSlots.dayOfWeek, reservationSlots.startTime); }
+export async function listRestaurantTables(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: restaurantTables.id, branchId: restaurantTables.branchId, name: restaurantTables.name, seats: restaurantTables.seats, status: restaurantTables.status, tableType: restaurantTables.tableType, minimumCharge: restaurantTables.minimumCharge, tableFee: restaurantTables.tableFee }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(branches.restaurantId, restaurantId), eq(restaurantTables.branchId, branchId))).orderBy(restaurantTables.name); }
+export async function listQrCodes(restaurantId: number, branchId: number, type?: "table" | "order" | "waiter_call" | "custom") { const db = await getDb(); if (!db) return []; return db.select().from(qrCodes).where(and(eq(qrCodes.restaurantId, restaurantId), eq(qrCodes.branchId, branchId), type ? eq(qrCodes.type, type) : undefined)).orderBy(desc(qrCodes.createdAt)); }
+export async function getPublicQrCode(token: string) { const db = await getDb(); if (!db) return undefined; return (await db.select({ id: qrCodes.id, restaurantId: qrCodes.restaurantId, branchId: qrCodes.branchId, type: qrCodes.type, purpose: qrCodes.purpose, targetUrl: qrCodes.targetUrl, visualConfigJson: qrCodes.visualConfigJson, token: qrCodes.token, label: qrCodes.label, tableId: qrCodes.tableId, orderId: qrCodes.orderId, amount: qrCodes.amount, status: qrCodes.status, expiresAt: qrCodes.expiresAt, tableName: restaurantTables.name, restaurantName: restaurants.brandName }).from(qrCodes).innerJoin(restaurants, eq(qrCodes.restaurantId, restaurants.id)).leftJoin(restaurantTables, eq(qrCodes.tableId, restaurantTables.id)).where(and(eq(qrCodes.token, token), eq(qrCodes.status, "active"), ne(restaurants.status, "suspended"))).limit(1))[0]; }
+export async function createQrCode(input: { restaurantId: number; branchId: number; type: "table" | "order" | "waiter_call" | "custom"; purpose?: string; targetUrl?: string | null; visualConfigJson?: string | null; token: string; label: string; tableId?: number | null; orderId?: number | null; amount?: string | null; expiresAt?: Date | null; createdByUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(qrCodes).values({ restaurantId: input.restaurantId, branchId: input.branchId, type: input.type, purpose: input.purpose ?? "menu", targetUrl: input.targetUrl ?? null, visualConfigJson: input.visualConfigJson ?? null, token: input.token, label: input.label, tableId: input.tableId ?? null, orderId: input.orderId ?? null, amount: input.amount ?? null, expiresAt: input.expiresAt ?? null, createdByUserId: input.createdByUserId }); return Number(result[0].insertId); }
+export async function ensureMenuQrCode(input: { restaurantId: number; branchId: number; createdByUserId: number; label?: string }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const token = `qr-${input.restaurantId}-${input.branchId}-menu-branch-default`; const existing = (await db.select({ id: qrCodes.id, status: qrCodes.status, label: qrCodes.label }).from(qrCodes).where(and(eq(qrCodes.restaurantId, input.restaurantId), eq(qrCodes.branchId, input.branchId), eq(qrCodes.token, token))).limit(1))[0]; if (existing) { await db.update(qrCodes).set({ status: "active", purpose: "menu", targetUrl: null, tableId: null, orderId: null, label: input.label?.trim() || existing.label || "منيو المطعم", updatedAt: new Date() }).where(and(eq(qrCodes.id, existing.id), eq(qrCodes.restaurantId, input.restaurantId), eq(qrCodes.branchId, input.branchId))); return { id: existing.id, token, reused: true }; } const id = await createQrCode({ restaurantId: input.restaurantId, branchId: input.branchId, type: "custom", purpose: "menu", token, label: input.label?.trim() || "منيو المطعم", createdByUserId: input.createdByUserId }); return { id, token, reused: false }; }
+export async function disableQrCode(id: number, restaurantId: number, branchId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(qrCodes).set({ status: "disabled", updatedAt: new Date() }).where(and(eq(qrCodes.id, id), eq(qrCodes.restaurantId, restaurantId), eq(qrCodes.branchId, branchId))); }
+export async function createReservationWithTable(input: { restaurantId: number; branchId: number | null; slotId?: number | null; seatingSectionId?: number | null; customerId?: number | null; customerName: string; email?: string | null; phone?: string | null; partySize: number; childrenCount?: number; policyAcceptedAt?: Date | null; reservedFor: Date; durationMinutes?: number; notes?: string | null; createdByUserId?: number | null; assignedTableId?: number | null; isTest?: boolean; depositAmount?: number | string; depositStatus?: "not_required" | "pending" | "paid" | "refunded"; rejectionReason?: string | null; initialStatus?: "pending" | "confirmed" }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  if (!input.branchId) throw new Error("اختر فرعًا للحجز");
+  const blackoutDate = input.reservedFor.toISOString().slice(0, 10);
+  const blackout = (await db.select({ reason: reservationBlackoutDates.reason }).from(reservationBlackoutDates).where(and(eq(reservationBlackoutDates.restaurantId, input.restaurantId), eq(reservationBlackoutDates.branchId, input.branchId), eq(reservationBlackoutDates.blackoutDate, blackoutDate))).limit(1))[0];
+  if (blackout) throw new Error(`الحجوزات متوقفة في هذا اليوم: ${blackout.reason}`);
+  const durationMinutes = Math.max(15, Math.min(360, input.durationMinutes ?? 60));
+  const start = input.reservedFor; const end = new Date(start.getTime() + durationMinutes * 60_000);
+  return db.transaction(async (tx) => {
+    const candidates = await tx.select({ id: restaurantTables.id, seats: restaurantTables.seats, name: restaurantTables.name, seatingSectionId: restaurantTables.seatingSectionId }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(branches.restaurantId, input.restaurantId), eq(restaurantTables.branchId, input.branchId!), gte(restaurantTables.seats, input.partySize), ne(restaurantTables.status, "occupied"), input.assignedTableId ? eq(restaurantTables.id, input.assignedTableId) : undefined, input.seatingSectionId ? eq(restaurantTables.seatingSectionId, input.seatingSectionId) : undefined)).orderBy(restaurantTables.seats, restaurantTables.id);
+    for (const table of candidates) {
+      const conflicts = await tx.select({ id: reservations.id }).from(reservations).where(and(eq(reservations.assignedTableId, table.id), inArray(reservations.status, ["pending", "confirmed", "seated"]), sql`${reservations.reservedFor} < ${end}`, sql`DATE_ADD(${reservations.reservedFor}, INTERVAL ${reservations.durationMinutes} MINUTE) > ${start}`)).limit(1);
+      if (conflicts.length > 0) continue;
+      const result = await tx.insert(reservations).values({ restaurantId: input.restaurantId, branchId: input.branchId, slotId: input.slotId ?? null, createdByUserId: input.createdByUserId ?? null, customerId: input.customerId ?? null, assignedTableId: table.id, seatingSectionId: input.seatingSectionId ?? table.seatingSectionId ?? null, kind: "reservation", isTest: input.isTest ?? false, rejectionReason: input.rejectionReason ?? null, depositAmount: String(input.depositAmount ?? "0"), depositStatus: input.depositStatus ?? "not_required", customerName: input.customerName, email: input.email ?? null, phone: input.phone ?? null, partySize: input.partySize, childrenCount: input.childrenCount ?? 0, policyAcceptedAt: input.policyAcceptedAt ?? null, durationMinutes, reservedFor: start, status: input.initialStatus ?? "confirmed", notes: input.notes ?? null });
+      const status = input.initialStatus ?? "confirmed"; return { id: Number(result[0].insertId), tableId: table.id, tableName: table.name, status, durationMinutes };
+    }
+    throw new Error("لا توجد طاولة شاغرة تستوعب عدد الأشخاص في الوقت المحدد");
+  });
+}
+export async function listReservationsDueForNoShow(now = new Date()) { const db = await getDb(); if (!db) return []; return db.select({ id: reservations.id, restaurantId: reservations.restaurantId, assignedTableId: reservations.assignedTableId, customerName: reservations.customerName, email: reservations.email, reservedFor: reservations.reservedFor, restaurantName: restaurants.name, graceMinutes: restaurants.reservationNoShowGraceMinutes }).from(reservations).innerJoin(restaurants, eq(reservations.restaurantId, restaurants.id)).where(and(eq(reservations.status, "confirmed"), sql`TIMESTAMPADD(MINUTE, ${restaurants.reservationNoShowGraceMinutes}, ${reservations.reservedFor}) <= ${now}`)); }
+export async function markReservationNoShow(id: number) { const db = await getDb(); if (!db) return false; const result = await db.update(reservations).set({ status: "cancelled", noShowNotifiedAt: new Date(), updatedAt: new Date() }).where(and(eq(reservations.id, id), eq(reservations.status, "confirmed"))); return Number(result[0].affectedRows ?? 0) === 1; }
+export async function listReservationBlackoutDates(restaurantId: number, branchId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: reservationBlackoutDates.id, restaurantId: reservationBlackoutDates.restaurantId, branchId: reservationBlackoutDates.branchId, blackoutDate: reservationBlackoutDates.blackoutDate, reason: reservationBlackoutDates.reason }).from(reservationBlackoutDates).where(and(eq(reservationBlackoutDates.restaurantId, restaurantId), eq(reservationBlackoutDates.branchId, branchId))).orderBy(reservationBlackoutDates.blackoutDate); }
+export async function saveReservationBlackoutDate(input: { id?: number; restaurantId: number; branchId: number; blackoutDate: string; reason: string; createdByUserId?: number | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { restaurantId: input.restaurantId, branchId: input.branchId, blackoutDate: input.blackoutDate, reason: input.reason.trim(), createdByUserId: input.createdByUserId ?? null }; if (input.id) { await db.update(reservationBlackoutDates).set({ blackoutDate: values.blackoutDate, reason: values.reason, updatedAt: new Date() }).where(and(eq(reservationBlackoutDates.id, input.id), eq(reservationBlackoutDates.restaurantId, input.restaurantId), eq(reservationBlackoutDates.branchId, input.branchId))); return input.id; } const existing = (await db.select({ id: reservationBlackoutDates.id }).from(reservationBlackoutDates).where(and(eq(reservationBlackoutDates.restaurantId, input.restaurantId), eq(reservationBlackoutDates.branchId, input.branchId), eq(reservationBlackoutDates.blackoutDate, input.blackoutDate))).limit(1))[0]; if (existing) { await db.update(reservationBlackoutDates).set({ reason: values.reason, createdByUserId: values.createdByUserId, updatedAt: new Date() }).where(eq(reservationBlackoutDates.id, existing.id)); return existing.id; } const result = await db.insert(reservationBlackoutDates).values(values); return Number(result[0].insertId); }
+export async function deleteReservationBlackoutDate(input: { id: number; restaurantId: number; branchId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(reservationBlackoutDates).where(and(eq(reservationBlackoutDates.id, input.id), eq(reservationBlackoutDates.restaurantId, input.restaurantId), eq(reservationBlackoutDates.branchId, input.branchId))); return input.id; }
+export async function saveReservationSlot(input: { id?: number; restaurantId: number; branchId: number; dayOfWeek: number; startTime: string; endTime: string; capacity: number; slotDurationMinutes: number; isActive: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const values = { restaurantId: input.restaurantId, branchId: input.branchId, dayOfWeek: input.dayOfWeek, startTime: input.startTime, endTime: input.endTime, capacity: input.capacity, slotDurationMinutes: input.slotDurationMinutes, isActive: input.isActive }; if (input.id) { await db.update(reservationSlots).set({ ...values, updatedAt: new Date() }).where(and(eq(reservationSlots.id, input.id), eq(reservationSlots.restaurantId, input.restaurantId))); return input.id; } const result = await db.insert(reservationSlots).values(values); return Number(result[0].insertId); }
+export async function deleteReservationSlot(id: number, restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(reservationSlots).where(and(eq(reservationSlots.id, id), eq(reservationSlots.restaurantId, restaurantId))); }
+export function getTestAccountOpenId(userId: number) {
+  return userId < 0 ? `test_${Math.abs(userId)}` : null;
+}
+
+async function resolvePersistedUserId(userId: number) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
+  if (!db) return undefined;
+  const direct = userId > 0
+    ? (await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1))[0]
+    : undefined;
+  if (direct) return direct.id;
+  if (userId >= 0) return undefined;
+  const testAccountId = Math.abs(userId);
+  const testAccount = (await db.select({ id: testAccounts.id, email: testAccounts.email, displayName: testAccounts.displayName, role: testAccounts.role }).from(testAccounts).where(eq(testAccounts.id, testAccountId)).limit(1))[0];
+  if (!testAccount) return undefined;
+  const openId = getTestAccountOpenId(userId) ?? `test_${testAccount.id}`;
+  await upsertUser({ openId, name: testAccount.displayName, email: testAccount.email, loginMethod: "test", role: testAccount.role === "admin" ? "admin" : "user" });
+  return (await db.select({ id: users.id }).from(users).where(eq(users.openId, openId)).limit(1))[0]?.id;
+}
+
+export async function getUserPreferences(userId: number) { const db = await getDb(); if (!db) return undefined; const persistedUserId = await resolvePersistedUserId(userId); if (!persistedUserId) return undefined; return (await db.select().from(userPreferences).where(eq(userPreferences.userId, persistedUserId)).limit(1))[0]; }
+export async function upsertUserPreferences(userId: number, input: { language: string; themeMode: "light" | "dark" | "system"; themePreset: string; notificationPreferencesJson?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const persistedUserId = await resolvePersistedUserId(userId); if (!persistedUserId) throw new Error("تعذر ربط حساب المستخدم بحفظ التفضيلات"); const existing = await getUserPreferences(persistedUserId); if (existing) { await db.update(userPreferences).set({ ...input, updatedAt: new Date() }).where(eq(userPreferences.userId, persistedUserId)); return existing.id; } const result = await db.insert(userPreferences).values({ userId: persistedUserId, ...input }); return Number(result[0].insertId); }
+export type QuickNoteTemplate = { id: string; text: string; updatedAt: number };
+export function parseQuickNoteTemplates(raw?: string | null): QuickNoteTemplate[] { if (!raw) return []; try { const parsed: unknown = JSON.parse(raw); if (!Array.isArray(parsed)) return []; return parsed.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")).map((item) => ({ id: typeof item.id === "string" && item.id.length >= 4 ? item.id : nanoid(10), text: typeof item.text === "string" ? item.text.trim().slice(0, 1000) : "", updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now() })).filter((item) => item.text.length >= 2).slice(0, 8); } catch { return []; } }
+export async function listMyQuickNoteTemplates(userId: number) { const preferences = await getUserPreferences(userId); return parseQuickNoteTemplates(preferences?.noteTemplatesJson); }
+export async function saveMyQuickNoteTemplate(userId: number, input: { id?: string; text: string }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const persistedUserId = await resolvePersistedUserId(userId); if (!persistedUserId) throw new Error("تعذر ربط حساب المستخدم بحفظ القالب"); const text = input.text.trim().slice(0, 1000); if (text.length < 2) throw new Error("قالب الملاحظة قصير جدًا"); const preferences = await getUserPreferences(persistedUserId); const templates = parseQuickNoteTemplates(preferences?.noteTemplatesJson); const now = Date.now(); const existingIndex = input.id ? templates.findIndex((template) => template.id === input.id) : -1; const duplicateIndex = templates.findIndex((template) => template.text === text && template.id !== input.id); if (duplicateIndex >= 0) return templates; const next = [...templates]; if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], text, updatedAt: now }; else next.unshift({ id: nanoid(10), text, updatedAt: now }); const limited = next.slice(0, 8); if (preferences) await db.update(userPreferences).set({ noteTemplatesJson: JSON.stringify(limited), updatedAt: new Date() }).where(eq(userPreferences.userId, persistedUserId)); else await db.insert(userPreferences).values({ userId: persistedUserId, language: "ar", themeMode: "system", themePreset: "nfood-sunset", noteTemplatesJson: JSON.stringify(limited) }); return limited; }
+export async function deleteMyQuickNoteTemplate(userId: number, id: string) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const persistedUserId = await resolvePersistedUserId(userId); if (!persistedUserId) return []; const preferences = await getUserPreferences(persistedUserId); const next = parseQuickNoteTemplates(preferences?.noteTemplatesJson).filter((template) => template.id !== id); if (preferences) await db.update(userPreferences).set({ noteTemplatesJson: JSON.stringify(next), updatedAt: new Date() }).where(eq(userPreferences.userId, persistedUserId)); return next; }
+export async function listFavoriteMenuItems(userId: number, restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: favoriteMenuItems.id, menuItemId: favoriteMenuItems.menuItemId, createdAt: favoriteMenuItems.createdAt }).from(favoriteMenuItems).where(and(eq(favoriteMenuItems.userId, userId), eq(favoriteMenuItems.restaurantId, restaurantId))).orderBy(desc(favoriteMenuItems.createdAt)); }
+export async function listCustomerReservations(customerId: number, limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  const safeLimit = Math.min(Math.max(limit, 1), 100);
+  return db.select({
+    id: reservations.id,
+    customerId: reservations.customerId,
+    restaurantId: reservations.restaurantId,
+    branchId: reservations.branchId,
+    slotId: reservations.slotId,
+    assignedTableId: reservations.assignedTableId,
+    seatingSectionId: reservations.seatingSectionId,
+    kind: reservations.kind,
+    customerName: reservations.customerName,
+    email: reservations.email,
+    phone: reservations.phone,
+    partySize: reservations.partySize,
+    childrenCount: reservations.childrenCount,
+    durationMinutes: reservations.durationMinutes,
+    reservedFor: reservations.reservedFor,
+    status: reservations.status,
+    notes: reservations.notes,
+    createdAt: reservations.createdAt,
+    updatedAt: reservations.updatedAt,
+    restaurantName: restaurants.name,
+    restaurantSlug: restaurants.slug,
+    brandColor: restaurants.brandColor,
+    branchName: branches.name,
+    seatingSectionName: seatingSections.name,
+  }).from(reservations)
+    .leftJoin(restaurants, eq(reservations.restaurantId, restaurants.id))
+    .leftJoin(branches, eq(reservations.branchId, branches.id))
+    .leftJoin(seatingSections, eq(reservations.seatingSectionId, seatingSections.id))
+    .where(eq(reservations.customerId, customerId))
+    .orderBy(desc(reservations.reservedFor))
+    .limit(safeLimit);
+}
+
+export async function cancelCustomerReservation(id: number, customerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const result = await db.update(reservations)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(reservations.id, id), eq(reservations.customerId, customerId), inArray(reservations.status, ["pending", "confirmed"])));
+  return { cancelled: Number(result[0].affectedRows ?? 0) > 0 };
+}
+
+export async function updateCustomerReservation(input: { id: number; customerId: number; customerName: string; email?: string | null; phone?: string | null; partySize: number; childrenCount?: number; reservedFor: Date; durationMinutes: number; notes?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  return db.transaction(async (tx) => {
+    const existing = (await tx.select().from(reservations).where(and(eq(reservations.id, input.id), eq(reservations.customerId, input.customerId))).limit(1))[0];
+    if (!existing || !["pending", "confirmed"].includes(existing.status)) return { updated: false, reason: "not_editable" as const };
+    const durationMinutes = Math.max(15, Math.min(360, input.durationMinutes));
+    const end = new Date(input.reservedFor.getTime() + durationMinutes * 60_000);
+    if (existing.assignedTableId) {
+      const table = (await tx.select({ seats: restaurantTables.seats }).from(restaurantTables).where(eq(restaurantTables.id, existing.assignedTableId)).limit(1))[0];
+      if (!table || table.seats < input.partySize) return { updated: false, reason: "capacity" as const };
+      const conflicts = await tx.select({ id: reservations.id }).from(reservations).where(and(eq(reservations.assignedTableId, existing.assignedTableId), ne(reservations.id, input.id), inArray(reservations.status, ["pending", "confirmed", "seated"]), sql`${reservations.reservedFor} < ${end}`, sql`DATE_ADD(${reservations.reservedFor}, INTERVAL ${reservations.durationMinutes} MINUTE) > ${input.reservedFor}`)).limit(1);
+      if (conflicts.length) return { updated: false, reason: "conflict" as const };
+    }
+    await tx.update(reservations).set({ customerName: input.customerName, email: input.email ?? null, phone: input.phone ?? null, partySize: input.partySize, childrenCount: input.childrenCount ?? 0, reservedFor: input.reservedFor, durationMinutes, notes: input.notes ?? null, updatedAt: new Date() }).where(eq(reservations.id, input.id));
+    return { updated: true, reason: null };
+  });
+}
+
+export async function claimGuestOrders(customerId: number, guestPhone: string) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const phone = guestPhone.trim(); if (phone.length < 7) throw new Error("رقم الجوال غير صالح"); const result = await db.update(orders).set({ customerId, updatedAt: new Date() }).where(and(isNull(orders.customerId), eq(orders.guestPhone, phone))); return { linkedCount: Number(result[0].affectedRows ?? 0) }; }
+export async function listCustomerOrders(customerId: number, limit = 100) { const db = await getDb(); if (!db) return []; const safeLimit = Math.min(Math.max(limit, 1), 100); const rows = await db.select({ id: orders.id, restaurantId: orders.restaurantId, branchId: orders.branchId, status: orders.status, paymentStatus: orders.paymentStatus, channel: orders.channel, total: orders.total, currencyCode: orders.currencyCode, notes: orders.notes, reservationDate: orders.reservationDate, reservationEventType: orders.reservationEventType, createdAt: orders.createdAt, updatedAt: orders.updatedAt, restaurantName: restaurants.name, restaurantSlug: restaurants.slug, brandColor: restaurants.brandColor }).from(orders).leftJoin(restaurants, eq(orders.restaurantId, restaurants.id)).where(eq(orders.customerId, customerId)).orderBy(desc(orders.createdAt)).limit(safeLimit); if (!rows.length) return []; const itemRows = await db.select({ orderId: orderItems.orderId, menuItemId: orderItems.menuItemId, quantity: orderItems.quantity, name: menuItems.name }).from(orderItems).innerJoin(menuItems, eq(orderItems.menuItemId, menuItems.id)).where(inArray(orderItems.orderId, rows.map((row) => row.id))); const itemsByOrder = new Map<number, typeof itemRows>(); for (const item of itemRows) { const current = itemsByOrder.get(item.orderId) ?? []; current.push(item); itemsByOrder.set(item.orderId, current); } return rows.map((row) => ({ ...row, items: itemsByOrder.get(row.id) ?? [] })); }
+export async function listFavoriteRestaurants(userId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: favoriteRestaurants.id, restaurantId: favoriteRestaurants.restaurantId, name: restaurants.name, brandName: restaurants.brandName, brandColor: restaurants.brandColor, brandLogoUrl: restaurants.brandLogoUrl, city: restaurants.city, address: restaurants.address, phone: restaurants.phone, reservationEnabled: restaurants.reservationEnabled, createdAt: favoriteRestaurants.createdAt }).from(favoriteRestaurants).innerJoin(restaurants, eq(favoriteRestaurants.restaurantId, restaurants.id)).where(and(eq(favoriteRestaurants.userId, userId), ne(restaurants.status, "suspended"))).orderBy(desc(favoriteRestaurants.createdAt)); }
+export async function toggleFavoriteRestaurant(input: { userId: number; restaurantId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const restaurant = (await db.select({ id: restaurants.id }).from(restaurants).where(and(eq(restaurants.id, input.restaurantId), ne(restaurants.status, "suspended"))).limit(1))[0]; if (!restaurant) throw new Error("المطعم غير متاح حاليًا"); const existing = (await db.select({ id: favoriteRestaurants.id }).from(favoriteRestaurants).where(and(eq(favoriteRestaurants.userId, input.userId), eq(favoriteRestaurants.restaurantId, input.restaurantId))).limit(1))[0]; if (existing) { await db.delete(favoriteRestaurants).where(eq(favoriteRestaurants.id, existing.id)); return { favorite: false }; } await db.insert(favoriteRestaurants).values(input); return { favorite: true }; }
+export async function listAllFavoriteMenuItems(userId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: favoriteMenuItems.id, menuItemId: favoriteMenuItems.menuItemId, restaurantId: favoriteMenuItems.restaurantId, itemName: menuItems.name, description: menuItems.description, price: menuItems.price, compareAtPrice: menuItems.compareAtPrice, imageUrl: menuItems.imageUrl, restaurantName: restaurants.name, restaurantSlug: restaurants.slug, isAvailable: menuItems.isAvailable, createdAt: favoriteMenuItems.createdAt }).from(favoriteMenuItems).innerJoin(menuItems, eq(favoriteMenuItems.menuItemId, menuItems.id)).innerJoin(restaurants, eq(favoriteMenuItems.restaurantId, restaurants.id)).where(and(eq(favoriteMenuItems.userId, userId), eq(restaurants.status, "active"))).orderBy(desc(favoriteMenuItems.createdAt)); }
+export async function listCustomerLoyaltyAccounts(customerId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: loyaltyAccounts.id, restaurantId: loyaltyAccounts.restaurantId, pointsBalance: loyaltyAccounts.pointsBalance, tier: loyaltyAccounts.tier, restaurantName: restaurants.name, restaurantSlug: restaurants.slug, brandLogoUrl: restaurants.brandLogoUrl, brandColor: restaurants.brandColor }).from(loyaltyAccounts).innerJoin(restaurants, eq(loyaltyAccounts.restaurantId, restaurants.id)).where(and(eq(loyaltyAccounts.customerId, customerId), eq(restaurants.status, "active"))).orderBy(desc(loyaltyAccounts.updatedAt)); }
+export async function toggleFavoriteMenuItem(input: { userId: number; restaurantId: number; menuItemId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = (await db.select({ id: favoriteMenuItems.id }).from(favoriteMenuItems).where(and(eq(favoriteMenuItems.userId, input.userId), eq(favoriteMenuItems.restaurantId, input.restaurantId), eq(favoriteMenuItems.menuItemId, input.menuItemId))).limit(1))[0]; if (existing) { await db.delete(favoriteMenuItems).where(eq(favoriteMenuItems.id, existing.id)); return { favorite: false }; } await db.insert(favoriteMenuItems).values(input); return { favorite: true }; }
+export function pointInPolygon(latitude: number, longitude: number, polygon: Array<{ latitude: number; longitude: number }>) { let inside = false; for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) { const current = polygon[index]; const prior = polygon[previous]; const intersects = ((current.longitude > longitude) !== (prior.longitude > longitude)) && latitude < (prior.latitude - current.latitude) * (longitude - current.longitude) / ((prior.longitude - current.longitude) || Number.EPSILON) + current.latitude; if (intersects) inside = !inside; } return inside; }
+export function haversineDistanceKm(latitudeA: number, longitudeA: number, latitudeB: number, longitudeB: number) { const radians = (value: number) => value * Math.PI / 180; const dLat = radians(latitudeB - latitudeA); const dLon = radians(longitudeB - longitudeA); const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(latitudeA)) * Math.cos(radians(latitudeB)) * Math.sin(dLon / 2) ** 2; return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); }
+export async function listAvailableRestaurantDrivers(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ workerId: remoteWorkers.id, userId: remoteWorkers.userId, name: users.name, email: users.email, latitude: remoteWorkers.latitude, longitude: remoteWorkers.longitude, vehicleType: remoteWorkers.vehicleType, lastLocationAt: remoteWorkers.lastLocationAt }).from(remoteWorkers).innerJoin(users, eq(remoteWorkers.userId, users.id)).where(and(eq(remoteWorkers.restaurantId, restaurantId), eq(remoteWorkers.role, "driver"), eq(remoteWorkers.isActive, true), eq(remoteWorkers.isAvailable, true))); }
+export function selectNearestDriver<T extends { userId: number; latitude: string | number | null; longitude: string | number | null }>(drivers: T[], origin: { latitude: number | string | null; longitude: number | string | null }) { if (origin.latitude === null || origin.longitude === null || (typeof origin.latitude === "string" && !origin.latitude.trim()) || (typeof origin.longitude === "string" && !origin.longitude.trim())) return null; const originLatitude = Number(origin.latitude); const originLongitude = Number(origin.longitude); if (!Number.isFinite(originLatitude) || !Number.isFinite(originLongitude)) return null; return drivers.map((driver) => ({ driver, distanceKm: haversineDistanceKm(originLatitude, originLongitude, Number(driver.latitude), Number(driver.longitude)) })).filter((candidate) => candidate.driver.latitude !== null && candidate.driver.longitude !== null && Number.isFinite(Number(candidate.driver.latitude)) && Number.isFinite(Number(candidate.driver.longitude)) && Number.isFinite(candidate.distanceKm)).sort((a, b) => a.distanceKm - b.distanceKm || a.driver.userId - b.driver.userId)[0] ?? null; }
+export async function provisionDeliveryDemoAccounts(restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const temporaryPassword = "Nfood123!"; const definitions = [{ role: "customer" as const, email: "s.customer@info.com", displayName: "S Customer" }, { role: "driver" as const, email: "d.driver@nafod.com", displayName: "D Driver" }]; const result: Array<{ role: "customer" | "driver"; email: string; displayName: string; userId: number; accountId: number; temporaryPassword: string }> = []; for (const definition of definitions) { const openId = `demo-delivery-${restaurantId}-${definition.role}`; await db.insert(users).values({ openId, name: definition.displayName, email: definition.email, loginMethod: "demo", role: "user", emailVerified: true, lastSignedIn: new Date() }).onDuplicateKeyUpdate({ set: { name: definition.displayName, email: definition.email, loginMethod: "demo", emailVerified: true, updatedAt: new Date() } }); const user = (await db.select({ id: users.id }).from(users).where(eq(users.openId, openId)).limit(1))[0]; if (!user) throw new Error("تعذر إنشاء هوية الحساب التجريبي"); const existing = (await db.select({ id: testAccounts.id }).from(testAccounts).where(eq(testAccounts.email, definition.email)).limit(1))[0]; const salt = randomBytes(16).toString("base64"); const passwordHash = `scrypt$${salt}$${scryptSync(temporaryPassword, Buffer.from(salt, "base64"), 64).toString("base64")}`; let accountId = existing?.id; if (existing) await db.update(testAccounts).set({ restaurantId, displayName: definition.displayName, role: definition.role, passwordHash, isActive: true }).where(eq(testAccounts.id, existing.id)); else { const inserted = await db.insert(testAccounts).values({ restaurantId, email: definition.email, displayName: definition.displayName, role: definition.role, passwordHash, isActive: true }); accountId = Number(inserted[0].insertId); } if (definition.role === "driver") { const worker = (await db.select({ id: remoteWorkers.id }).from(remoteWorkers).where(and(eq(remoteWorkers.restaurantId, restaurantId), eq(remoteWorkers.userId, user.id), eq(remoteWorkers.role, "driver"))).limit(1))[0]; if (worker) await db.update(remoteWorkers).set({ isActive: true, isAvailable: true }).where(eq(remoteWorkers.id, worker.id)); else await db.insert(remoteWorkers).values({ restaurantId, userId: user.id, role: "driver", isAvailable: true, isActive: true, vehicleType: "demo" }); } result.push({ role: definition.role, email: definition.email, displayName: definition.displayName, userId: user.id, accountId: accountId!, temporaryPassword }); } return result; }
+export async function listFeatureRequests(restaurantId?: number) { const db = await getDb(); if (!db) return []; return db.select().from(featureRequests).where(restaurantId ? eq(featureRequests.restaurantId, restaurantId) : undefined).orderBy(desc(featureRequests.createdAt)); }
+export async function createFeatureRequest(input: { restaurantId: number; requestedByUserId: number; featureKey: string; featureLabel: string; requestedPrice?: string | null; currencyCode?: string; notes?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = (await db.select({ id: featureRequests.id, status: featureRequests.status }).from(featureRequests).where(and(eq(featureRequests.restaurantId, input.restaurantId), eq(featureRequests.featureKey, input.featureKey), eq(featureRequests.status, "pending"))).limit(1))[0]; if (existing) return existing.id; const result = await db.insert(featureRequests).values({ restaurantId: input.restaurantId, requestedByUserId: input.requestedByUserId, featureKey: input.featureKey, featureLabel: input.featureLabel, requestedPrice: input.requestedPrice ?? null, currencyCode: input.currencyCode ?? "SAR", notes: input.notes ?? null }); return Number(result[0].insertId); }
+export async function reviewFeatureRequest(input: { id: number; status: "approved" | "rejected"; reviewedByUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const request = (await db.select().from(featureRequests).where(eq(featureRequests.id, input.id)).limit(1))[0]; if (!request) return null; await db.update(featureRequests).set({ status: input.status, reviewedByUserId: input.reviewedByUserId, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(featureRequests.id, input.id)); if (request.featureKey === "platform_delivery" && input.status === "approved") await db.update(restaurants).set({ deliveryManagementMode: "platform", platformDeliveryEnabled: true }).where(eq(restaurants.id, request.restaurantId)); return { ...request, status: input.status }; }
+export const CUSTOMER_BENEFIT_SEED = [
+  ["market-buyer", "شراء محتوى Trend Kitchen", "الوصول إلى المحتوى الرقمي المؤهل للشراء"], ["studio-upload", "استوديو رفع الصور", "رفع صور الطعام من كاميرا Studio"], ["watermark-preview", "معاينة بعلامة مائية", "معاينة آمنة قبل النشر أو الشراء"], ["wallet", "محفظة المحتوى", "عرض الرصيد وحركات المكافآت"], ["instant-library", "مكتبة التسليم الفوري", "استلام المشتريات الرقمية فور الدفع"], ["reward-alerts", "تنبيهات المكافآت", "إشعار عند شراء المطاعم لمحتواك"], ["qr-custom", "تخصيص QR", "ألوان وحجم وهامش QR الخاص بك"], ["nfc-card", "بطاقة NFC / V Card", "ربط بطاقة عامة بملفك"], ["public-profile", "ملف عام متقدم", "عرض نبذة ومنتجاتك الغذائية"], ["private-profile", "ملف خاص بالدعوات", "مشاركة الملف مع أصدقاء محددين"], ["profile-products", "منتجات الملف", "إضافة صور ووصفات وخدمات"], ["profile-payments", "طرق الدفع في الملف", "عرض طرق الدفع التي تختارها"], ["restaurant-favorites", "مفضلة المطاعم", "حفظ المطاعم والأصناف المفضلة"], ["order-history", "سجل الطلبات", "متابعة الطلبات السابقة"], ["reservation-history", "سجل الحجوزات", "إدارة الحجوزات والزيارات"], ["loyalty-points", "نقاط الولاء", "تجميع نقاط المطاعم المرتبطة"], ["reward-levels", "مستويات المكافآت", "متابعة المستوى لكل مطعم"], ["safe-chat", "مراسلة آمنة", "التواصل داخل التطبيق دون كشف الأرقام"], ["order-live", "تتبع الطلب", "متابعة حالة الطلب لحظيًا"], ["driver-chat", "محادثة السائق", "التواصل المقيد بخصوص التوصيل"], ["support-priority", "دعم أولوية", "معالجة أسرع لطلبات الدعم"], ["studio-camera", "كاميرا Studio المباشرة", "التقاط الصورة من داخل المنصة"], ["ai-food-check", "فحص الطعام بالذكاء الاصطناعي", "تحقق أولي من كون الصورة طعامًا أو شرابًا"], ["metadata-check", "تحقق بيانات الالتقاط", "فحص التاريخ والجهاز والموقع عند التوفر"], ["content-status", "حالة المحتوى", "قيد المراجعة أو مقبول أو مرفوض مع السبب"], ["content-tags", "هاشتاقات الطعام", "تصنيف المحتوى حسب نوع الطعام"], ["content-search", "محرك بحث المحتوى", "العثور على محتوى حسب النوع والوسم"], ["content-sales", "تقرير مبيعات المحتوى", "متابعة ما تم عرضه وبيعه"], ["watermarked-share", "مشاركة المعاينة", "مشاركة رابط آمن للمعاينة فقط"], ["referrals", "ترشيح المطاعم", "إنشاء روابط ترشيح ومتابعة مكافآتها"], ["privacy-center", "مركز الخصوصية", "إدارة الموافقات والإشعارات"], ["device-security", "حماية الجهاز", "إدارة الجهاز الموثوق للحساب"], ["login-recovery", "استعادة كلمة المرور", "طلب رابط استعادة عبر البريد"], ["google-login", "تسجيل Google", "دخول أسرع ومزامنة البريد"], ["digital-receipts", "فواتير رقمية", "عرض فواتير المشتريات والطلبات"], ["offline-library", "وصول المكتبة المحفوظ", "عرض بيانات المكتبة عند ضعف الاتصال"], ["advanced-insights", "إحصائيات متقدمة", "ملخص التفاعل والمبيعات والمكافآت"], ["early-trends", "أولوية الاتجاهات", "اكتشاف تصنيفات Trend الجديدة مبكرًا"], ["creator-badge", "شارة صانع محتوى", "تمييز الحساب المؤهل في الاستديو"], ["export-report", "تصدير التقرير", "تجهيز تقرير المكافآت والمبيعات"],
+] as const;
+
+const CUSTOMER_BENEFIT_PLANS = [
+  { key: "customer-start", name: "الأساسي", description: "للحسابات الجديدة والطلبات اليومية", monthlyPrice: "0.00", yearlyPrice: "0.00", featureCount: 12 },
+  { key: "customer-plus", name: "Plus", description: "لعملاء Trend وصناع المحتوى النشطين", monthlyPrice: "29.00", yearlyPrice: "290.00", featureCount: 27 },
+  { key: "customer-pro", name: "Pro", description: "للوصول الكامل إلى منظومة العميل", monthlyPrice: "59.00", yearlyPrice: "590.00", featureCount: CUSTOMER_BENEFIT_SEED.length },
+] as const;
+
+async function ensureCustomerBenefitCatalog() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  for (const [key, label, description] of CUSTOMER_BENEFIT_SEED) {
+    await db.insert(customerBenefitFeatures).values({ key, label, description, category: "customer", isActive: true, isAddOn: true }).onDuplicateKeyUpdate({ set: { label, description, isActive: true, updatedAt: new Date() } });
   }
-
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
+  for (const plan of CUSTOMER_BENEFIT_PLANS) {
+    await db.insert(customerBenefitPlans).values({ key: plan.key, name: plan.name, description: plan.description, monthlyPrice: plan.monthlyPrice, yearlyPrice: plan.yearlyPrice, isActive: true }).onDuplicateKeyUpdate({ set: { name: plan.name, description: plan.description, monthlyPrice: plan.monthlyPrice, yearlyPrice: plan.yearlyPrice, isActive: true, updatedAt: new Date() } });
   }
+  const featureRows = await db.select().from(customerBenefitFeatures);
+  const planRows = await db.select().from(customerBenefitPlans);
+  for (const plan of CUSTOMER_BENEFIT_PLANS) {
+    const planRow = planRows.find((row) => row.key === plan.key);
+    if (!planRow) continue;
+    for (const feature of featureRows.slice(0, plan.featureCount)) {
+      await db.insert(customerBenefitPlanFeatures).values({ planId: planRow.id, featureId: feature.id, enabled: true }).onDuplicateKeyUpdate({ set: { enabled: true } });
+    }
+  }
+  return { featureRows, planRows };
+}
+
+export async function listCustomerBenefits(userId: number) {
+  const db = await getDb();
+  if (!db) return { features: [], plans: [], activePlan: null, requests: [] };
+  const { featureRows, planRows } = await ensureCustomerBenefitCatalog();
+  const [subscriptions, links, requests] = await Promise.all([
+    db.select().from(customerBenefitSubscriptions).where(and(eq(customerBenefitSubscriptions.userId, userId), eq(customerBenefitSubscriptions.status, "active"))).orderBy(desc(customerBenefitSubscriptions.updatedAt)).limit(1),
+    db.select({ planId: customerBenefitPlanFeatures.planId, featureId: customerBenefitPlanFeatures.featureId, enabled: customerBenefitPlanFeatures.enabled }).from(customerBenefitPlanFeatures),
+    db.select({ id: customerBenefitRequests.id, featureId: customerBenefitRequests.featureId, status: customerBenefitRequests.status, requestedPrice: customerBenefitRequests.requestedPrice, currencyCode: customerBenefitRequests.currencyCode, notes: customerBenefitRequests.notes, createdAt: customerBenefitRequests.createdAt, updatedAt: customerBenefitRequests.updatedAt }).from(customerBenefitRequests).where(eq(customerBenefitRequests.userId, userId)).orderBy(desc(customerBenefitRequests.createdAt)),
+  ]);
+  const activePlanId = subscriptions[0]?.planId ?? planRows.find((plan) => plan.key === "customer-start")?.id ?? null;
+  const activePlanRow = planRows.find((plan) => plan.id === activePlanId) ?? null;
+  const grantedIds = new Set(links.filter((link) => link.planId === activePlanId && link.enabled).map((link) => link.featureId));
+  const approvedIds = new Set(requests.filter((request) => request.status === "approved").map((request) => request.featureId));
+  return {
+    features: featureRows.map((feature) => ({ ...feature, enabled: grantedIds.has(feature.id) || approvedIds.has(feature.id), requested: requests.some((request) => request.featureId === feature.id && request.status === "pending") })),
+    plans: planRows.map((plan) => ({ ...plan, featureCount: links.filter((link) => link.planId === plan.id && link.enabled).length })),
+    activePlan: activePlanRow,
+    requests,
+  };
+}
+
+export async function setCustomerBenefitPlan(userId: number, planKey: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await ensureCustomerBenefitCatalog();
+  const plan = (await db.select().from(customerBenefitPlans).where(and(eq(customerBenefitPlans.key, planKey), eq(customerBenefitPlans.isActive, true))).limit(1))[0];
+  if (!plan) throw new Error("باقة العميل غير متاحة");
+  return db.transaction(async (tx) => {
+    await tx.update(customerBenefitSubscriptions).set({ status: "cancelled", updatedAt: new Date() }).where(and(eq(customerBenefitSubscriptions.userId, userId), eq(customerBenefitSubscriptions.status, "active")));
+    const inserted = await tx.insert(customerBenefitSubscriptions).values({ userId, planId: plan.id, status: "active", startsAt: new Date() });
+    return { id: Number(inserted[0].insertId), plan };
+  });
+}
+
+export async function createCustomerBenefitRequest(input: { userId: number; featureKey: string; notes?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await ensureCustomerBenefitCatalog();
+  const feature = (await db.select().from(customerBenefitFeatures).where(and(eq(customerBenefitFeatures.key, input.featureKey), eq(customerBenefitFeatures.isActive, true))).limit(1))[0];
+  if (!feature) throw new Error("ميزة العميل غير موجودة");
+  const existing = (await db.select({ id: customerBenefitRequests.id, status: customerBenefitRequests.status }).from(customerBenefitRequests).where(and(eq(customerBenefitRequests.userId, input.userId), eq(customerBenefitRequests.featureId, feature.id), eq(customerBenefitRequests.status, "pending"))).limit(1))[0];
+  if (existing) return { ...existing, duplicate: true };
+  const result = await db.insert(customerBenefitRequests).values({ userId: input.userId, featureId: feature.id, requestedPrice: feature.addonPrice ?? null, currencyCode: "SAR", notes: input.notes ?? null, status: "pending" });
+  return { id: Number(result[0].insertId), status: "pending" as const, duplicate: false };
+}
+
+export async function reviewCustomerBenefitRequest(input: { id: number; status: "approved" | "rejected"; reviewedByUserId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const request = (await db.select().from(customerBenefitRequests).where(eq(customerBenefitRequests.id, input.id)).limit(1))[0];
+  if (!request) return null;
+  await db.update(customerBenefitRequests).set({ status: input.status, reviewedByUserId: input.reviewedByUserId, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(customerBenefitRequests.id, input.id));
+  return { ...request, status: input.status };
+}
+
+export async function calculateDeliveryQuote(input: { restaurantId: number; branchId: number; latitude: number; longitude: number; subtotal: number }) { const zones = await listDeliveryZones(input.restaurantId, input.branchId); const matches = zones.map((zone) => { let polygon: Array<{ latitude: number; longitude: number }> = []; try { polygon = zone.polygonJson ? JSON.parse(zone.polygonJson) : []; } catch { polygon = []; } const insidePolygon = polygon.length >= 3 ? pointInPolygon(input.latitude, input.longitude, polygon) : false; const distanceKm = haversineDistanceKm(input.latitude, input.longitude, Number(zone.centerLatitude), Number(zone.centerLongitude)); return { zone, distanceKm, insidePolygon }; }).filter(({ zone, distanceKm, insidePolygon }) => zone.isActive && (insidePolygon || (!zone.polygonJson && distanceKm <= Number(zone.radiusKm))) && input.subtotal >= Number(zone.minimumOrder)).sort((a, b) => Number(a.zone.deliveryFee) - Number(b.zone.deliveryFee)); const match = matches[0]; return match ? { available: true as const, fee: Number(match.zone.deliveryFee), minimumOrder: Number(match.zone.minimumOrder), zoneId: match.zone.id, zoneName: match.zone.name, distanceKm: Number(match.distanceKm.toFixed(2)) } : { available: false as const, fee: 0, minimumOrder: 0, zoneId: null, zoneName: null, distanceKm: null }; }
+
+export async function listSupportTickets(restaurantId?: number) { const db = await getDb(); if (!db) return []; return db.select().from(supportTickets).where(restaurantId ? eq(supportTickets.restaurantId, restaurantId) : undefined).orderBy(desc(supportTickets.createdAt)); }
+export async function listSupportTicketsForRequester(requesterUserId: number, restaurantId?: number) { const db = await getDb(); if (!db) return []; return db.select().from(supportTickets).where(and(eq(supportTickets.requesterUserId, requesterUserId), restaurantId ? eq(supportTickets.restaurantId, restaurantId) : undefined)).orderBy(desc(supportTickets.createdAt)); }
+export async function listSupportAgents(includeInactive = false) { const db = await getDb(); if (!db) return []; return db.select({ id: supportAgents.id, userId: supportAgents.userId, isActive: supportAgents.isActive, skillsJson: supportAgents.skillsJson }).from(supportAgents).where(includeInactive ? undefined : eq(supportAgents.isActive, true)); }
+export async function createSupportAgent(input: { userId: number; skillsJson?: string }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(supportAgents).values({ userId: input.userId, skillsJson: input.skillsJson ?? null }); return Number(result[0].insertId); }
+export async function updateSupportAgent(id: number, input: { isActive?: boolean; skillsJson?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(supportAgents).set({ ...input, updatedAt: new Date() }).where(eq(supportAgents.id, id)); }
+export async function deleteSupportAgent(id: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(supportAgents).where(eq(supportAgents.id, id)); }
+export async function createSupportTicket(input: { restaurantId?: number; requesterUserId: number; subject: string; description: string; priority: "low" | "normal" | "high" | "urgent" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const now = Date.now(); const responseHours = input.priority === "urgent" ? 2 : input.priority === "high" ? 8 : input.priority === "normal" ? 24 : 48; const resolutionHours = input.priority === "urgent" ? 24 : input.priority === "high" ? 72 : input.priority === "normal" ? 120 : 168; const result = await db.insert(supportTickets).values({ ...input, restaurantId: input.restaurantId ?? null, firstResponseDueAt: new Date(now + responseHours * 3600000), resolutionDueAt: new Date(now + resolutionHours * 3600000) }); return Number(result[0].insertId); }
+export async function updateSupportTicket(id: number, input: { status?: "open" | "in_progress" | "pending" | "resolved" | "closed"; assignedAgentId?: number | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(supportTickets).set({ ...input, updatedAt: new Date() }).where(eq(supportTickets.id, id)); }
+export async function listApiWebhooks(scope: "platform" | "restaurant", restaurantId?: number) { const db = await getDb(); if (!db) return []; return db.select({ id: apiWebhooks.id, scope: apiWebhooks.scope, restaurantId: apiWebhooks.restaurantId, name: apiWebhooks.name, endpointUrl: apiWebhooks.endpointUrl, eventsJson: apiWebhooks.eventsJson, status: apiWebhooks.status, createdAt: apiWebhooks.createdAt, updatedAt: apiWebhooks.updatedAt }).from(apiWebhooks).where(and(eq(apiWebhooks.scope, scope), scope === "restaurant" && restaurantId ? eq(apiWebhooks.restaurantId, restaurantId) : undefined)).orderBy(desc(apiWebhooks.updatedAt)); }
+export async function upsertApiWebhook(input: { scope: "platform" | "restaurant"; restaurantId?: number; name: string; endpointUrl: string; secretHash: string; eventsJson: string; status: "active" | "disabled"; createdByUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(apiWebhooks).values({ ...input, restaurantId: input.restaurantId ?? null }); return Number(result[0].insertId); }
+export async function getApiWebhook(id: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(apiWebhooks).where(eq(apiWebhooks.id, id)).limit(1))[0]; }
+export async function updateApiWebhook(id: number, input: { name?: string; endpointUrl?: string; eventsJson?: string; status?: "active" | "disabled" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(apiWebhooks).set({ ...input, updatedAt: new Date() }).where(eq(apiWebhooks.id, id)); }
+export async function deleteApiWebhook(id: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(apiWebhooks).where(eq(apiWebhooks.id, id)); }
+
+export async function listVcardProducts(includeInactive = false) { const db = await getDb(); if (!db) return []; return db.select().from(vcardCardProducts).where(includeInactive ? undefined : eq(vcardCardProducts.isActive, true)).orderBy(desc(vcardCardProducts.createdAt)); }
+export async function createVcardProduct(input: { name: string; description?: string; price: string; currency?: string; targetRole: "customer" | "restaurant" | "driver"; isActive?: boolean }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(vcardCardProducts).values({ ...input, description: input.description ?? null, currency: input.currency ?? "SAR", isActive: input.isActive ?? true }); return Number(result[0].insertId); }
+export async function createVcardOrder(input: { productId: number; userId: number; restaurantId?: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(vcardCardOrders).values({ ...input, restaurantId: input.restaurantId ?? null, status: "pending_payment" }); return Number(result[0].insertId); }
+export async function createVcardCode(input: { productId: number; codeHash: string; codeLast4: string }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(vcardCardCodes).values({ ...input, status: "available" }); return Number(result[0].insertId); }
+export async function listVcardCodes(productId?: number) { const db = await getDb(); if (!db) return []; return db.select({ id: vcardCardCodes.id, productId: vcardCardCodes.productId, codeLast4: vcardCardCodes.codeLast4, status: vcardCardCodes.status, orderId: vcardCardCodes.orderId, createdAt: vcardCardCodes.createdAt, boundAt: vcardCardCodes.boundAt }).from(vcardCardCodes).where(productId ? eq(vcardCardCodes.productId, productId) : undefined).orderBy(desc(vcardCardCodes.createdAt)); }
+export async function disableVcardCode(id: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(vcardCardCodes).set({ status: "disabled" }).where(eq(vcardCardCodes.id, id)); }
+export async function bindVcardCode(input: { codeHash: string; userId: number; targetRole: "customer" | "restaurant" | "driver"; customerProfileId?: number; restaurantId?: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const code = (await db.select().from(vcardCardCodes).where(eq(vcardCardCodes.codeHash, input.codeHash)).limit(1))[0]; if (!code || code.status !== "available") throw new Error("VCard code is unavailable"); const result = await db.insert(vcardCardBindings).values({ codeId: code.id, userId: input.userId, customerProfileId: input.customerProfileId ?? null, restaurantId: input.restaurantId ?? null, targetRole: input.targetRole }); await db.update(vcardCardCodes).set({ status: "bound", boundAt: new Date() }).where(eq(vcardCardCodes.id, code.id)); return Number(result[0].insertId); }
+export async function getVcardBinding(userId: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(vcardCardBindings).where(eq(vcardCardBindings.userId, userId)).limit(1))[0]; }
+
+export const DEFAULT_TRANSLATE_WIDGET_CODE = `<div class="gtranslate_wrapper"></div>
+<script>window.gtranslateSettings = {"default_language":"ar","native_language_names":true,"detect_browser_language":true,"languages":["ar","fr","en"],"wrapper_selector":".gtranslate_wrapper","switcher_vertical_position":"top","flag_style":"3d","alt_flags":{"en":"usa"}}</script>
+<script src="https://cdn.gtranslate.net/widgets/latest/float.js" defer></script>`;
+export async function getPlatformSettings() {
+  const db = await getDb();
+  const defaults: Record<PlatformSettingKey, string> = { supportEmail: "", supportPhone: "", defaultCurrency: "SAR", defaultTimezone: "Asia/Riyadh", baseDomain: "", maintenanceMode: "false", allowGuestCheckout: "true", allowCustomerContentPurchase: "false", allowRestaurantContentPurchase: "true", siteLanguage: "ar", availableLanguages: "ar,en,fr", country: "Saudi Arabia", siteName: "NFOOD Restaurant SaaS", siteLogoUrl: "", socialLinks: "", copyrightYear: String(new Date().getFullYear()), currencyDisplayMode: "symbol", numberFormat: "1,000.00", pricingLayout: "style-1", analyticsId: "", facebookPixelId: "", siteDescription: "", homepageContent: "", termsOfService: "", privacyPolicy: "", refundPolicy: "", subscriptionTaxRate: "0", taxNumber: "", companyDetails: "", bankAccountName: "NFOOD", bankName: "", bankAccountNumber: "", bankTransferInstructions: "", vcardEnabledRoles: "customer", profileCustomerEnabled: "true", profileRestaurantEnabled: "true", profileDriverEnabled: "false", profilePlansJson: "[{\"key\":\"customer-basic\",\"label\":\"Customer Profile\",\"role\":\"customer\",\"enabled\":true,\"price\":\"0.00\"},{\"key\":\"restaurant-business\",\"label\":\"Restaurant Profile\",\"role\":\"restaurant\",\"enabled\":true,\"price\":\"0.00\"}]", profileAccountOverridesJson: "{}", referralReferrerPoints: "100", referralReferredPoints: "50", contentImagePrice: "5.00", customerStudioLimitBytes: "104857600", sectorGovernanceJson: "{}", seoTitle: "", seoDescription: "", seoKeywords: "", seoHashtags: "", seoImageUrl: "", seoCanonicalUrl: "", seoRobots: "index,follow", googleSearchConsoleVerification: "", googleAnalyticsMeasurementId: "", googleTagManagerId: "", structuredDataJson: "", translateWidgetCode: DEFAULT_TRANSLATE_WIDGET_CODE };
+  if (!db) return defaults;
+  const rows = await db.select({ key: platformSettings.settingKey, value: platformSettings.settingValue }).from(platformSettings);
+  for (const row of rows) { if (row.key in defaults) defaults[row.key as PlatformSettingKey] = row.value; }
+  return defaults;
+}
+
+export async function setPlatformSetting(key: PlatformSettingKey, value: string, updatedByUserId: number) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  await db.insert(platformSettings).values({ settingKey: key, settingValue: value, updatedByUserId }).onDuplicateKeyUpdate({ set: { settingValue: value, updatedByUserId, updatedAt: new Date() } });
+}
+
+export async function getLoyaltyAccount(restaurantId: number, customerId: number) {
+  const db = await getDb(); if (!db) return undefined;
+  return (await db.select().from(loyaltyAccounts).where(and(eq(loyaltyAccounts.restaurantId, restaurantId), eq(loyaltyAccounts.customerId, customerId))).limit(1))[0];
+}
+
+export async function ensureLoyaltyAccount(restaurantId: number, customerId: number) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const existing = await getLoyaltyAccount(restaurantId, customerId);
+  if (existing) return existing;
+  const result = await db.insert(loyaltyAccounts).values({ restaurantId, customerId, pointsBalance: 0, tier: "standard" });
+  return (await db.select().from(loyaltyAccounts).where(eq(loyaltyAccounts.id, Number(result[0].insertId))).limit(1))[0];
+}
+
+export async function getLoyaltySummary(restaurantId: number, customerId: number) {
+  const account = await ensureLoyaltyAccount(restaurantId, customerId);
+  const db = await getDb(); if (!db || !account) return { account, transactions: [] };
+  const transactions = await db.select().from(loyaltyTransactions).where(and(eq(loyaltyTransactions.restaurantId, restaurantId), eq(loyaltyTransactions.customerId, customerId))).orderBy(desc(loyaltyTransactions.createdAt)).limit(50);
+  return { account, transactions };
+}
+
+export async function addLoyaltyPoints(restaurantId: number, customerId: number, points: number, type: "earn" | "adjust" | "redeem", note?: string, orderId?: number) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const account = await ensureLoyaltyAccount(restaurantId, customerId);
+  if (!account) throw new Error("Loyalty account could not be created");
+  const nextBalance = account.pointsBalance + points;
+  if (nextBalance < 0) throw new Error("Loyalty points cannot be negative");
+  await db.update(loyaltyAccounts).set({ pointsBalance: nextBalance, tier: getLoyaltyTier(nextBalance), updatedAt: new Date() }).where(eq(loyaltyAccounts.id, account.id));
+  const result = await db.insert(loyaltyTransactions).values({ restaurantId, customerId, orderId: orderId ?? null, points, type, note: note ?? null });
+  return { accountId: account.id, transactionId: Number(result[0].insertId), pointsBalance: nextBalance };
+}
+
+export async function redeemLoyaltyPoints(input: { restaurantId: number; customerId: number; points: number; discountPercent: number; rewardLabel: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  if (input.points <= 0 || input.discountPercent <= 0 || input.discountPercent > 100) throw new Error("Invalid loyalty reward");
+  return db.transaction(async (tx) => {
+    const account = (await tx.select().from(loyaltyAccounts).where(and(eq(loyaltyAccounts.restaurantId, input.restaurantId), eq(loyaltyAccounts.customerId, input.customerId))).limit(1))[0];
+    if (!account || account.pointsBalance < input.points) throw new Error("رصيد النقاط غير كافٍ");
+    const code = `NFOOD-${nanoid(10).toUpperCase()}`;
+    const now = new Date();
+    const endsAt = new Date(now.getTime() + 30 * 86400000);
+    const campaignResult = await tx.insert(campaigns).values({ restaurantId: input.restaurantId, name: `مكافأة ولاء: ${input.rewardLabel}`, kind: "general", status: "active", startsAt: now, endsAt });
+    const campaignId = Number(campaignResult[0].insertId);
+    await tx.insert(coupons).values({ campaignId, code, discountPercent: input.discountPercent, usageLimit: 1, usedCount: 0 });
+    const nextBalance = account.pointsBalance - input.points;
+    await tx.update(loyaltyAccounts).set({ pointsBalance: nextBalance, tier: getLoyaltyTier(nextBalance), updatedAt: now }).where(eq(loyaltyAccounts.id, account.id));
+    const transactionResult = await tx.insert(loyaltyTransactions).values({ restaurantId: input.restaurantId, customerId: input.customerId, points: -input.points, type: "redeem", note: `${input.rewardLabel} · القسيمة ${code}` });
+    return { code, discountPercent: input.discountPercent, pointsBalance: nextBalance, transactionId: Number(transactionResult[0].insertId), expiresAt: endsAt };
+  });
+}
+
+export async function getOrCreateWalletAccount(customerId: number, currencyCode = "SAR") {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const existing = (await db.select().from(walletAccounts).where(eq(walletAccounts.customerId, customerId)).limit(1))[0];
+  if (existing) return existing;
+  const result = await db.insert(walletAccounts).values({ customerId, currencyCode, balance: "0.00" });
+  return (await db.select().from(walletAccounts).where(eq(walletAccounts.id, Number(result[0].insertId))).limit(1))[0];
+}
+export async function getCustomerWallet(customerId: number) {
+  const account = await getOrCreateWalletAccount(customerId);
+  const db = await getDb(); if (!db || !account) return { account, transactions: [], topups: [] };
+  const [transactions, topups] = await Promise.all([
+    db.select().from(walletTransactions).where(eq(walletTransactions.walletAccountId, account.id)).orderBy(desc(walletTransactions.createdAt)).limit(30),
+    db.select().from(walletTopupRequests).where(eq(walletTopupRequests.walletAccountId, account.id)).orderBy(desc(walletTopupRequests.createdAt)).limit(20),
+  ]);
+  return { account, transactions, topups };
+}
+export async function listWalletTopupRequests(status?: "pending" | "approved" | "rejected") {
+  const db = await getDb(); if (!db) return [];
+  return db.select({ id: walletTopupRequests.id, customerId: walletTopupRequests.customerId, customerName: users.name, customerEmail: users.email, amount: walletTopupRequests.amount, currencyCode: walletTopupRequests.currencyCode, paymentMethod: walletTopupRequests.paymentMethod, receiptUrl: walletTopupRequests.receiptUrl, status: walletTopupRequests.status, reviewNote: walletTopupRequests.reviewNote, reviewedAt: walletTopupRequests.reviewedAt, createdAt: walletTopupRequests.createdAt }).from(walletTopupRequests).leftJoin(users, eq(walletTopupRequests.customerId, users.id)).where(status ? eq(walletTopupRequests.status, status) : undefined).orderBy(desc(walletTopupRequests.createdAt)).limit(250);
+}
+
+export async function createWalletTopup(input: { customerId: number; amount: number; currencyCode: string; paymentMethod: "bank_transfer" | "cash" | "apple_pay"; receiptUrl?: string | null }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 1000000) throw new Error("قيمة الشحن غير صالحة");
+  const account = await getOrCreateWalletAccount(input.customerId, input.currencyCode);
+  if (!account) throw new Error("تعذر إنشاء المحفظة");
+  const result = await db.insert(walletTopupRequests).values({ customerId: input.customerId, walletAccountId: account.id, amount: input.amount.toFixed(2), currencyCode: input.currencyCode, paymentMethod: input.paymentMethod, receiptUrl: input.receiptUrl ?? null, status: "pending" });
+  return { id: Number(result[0].insertId), status: "pending" as const };
+}
+
+export async function reviewWalletTopup(input: { id: number; status: "approved" | "rejected"; reviewNote?: string | null; reviewedByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  return db.transaction(async (tx) => {
+    const topup = (await tx.select().from(walletTopupRequests).where(eq(walletTopupRequests.id, input.id)).limit(1))[0];
+    if (!topup) throw new Error("طلب الشحن غير موجود");
+    if (topup.status !== "pending") throw new Error("تمت مراجعة طلب الشحن مسبقًا");
+    const now = new Date();
+    await tx.update(walletTopupRequests).set({ status: input.status, reviewNote: input.reviewNote?.trim() || null, reviewedByUserId: input.reviewedByUserId, reviewedAt: now, updatedAt: now }).where(eq(walletTopupRequests.id, input.id));
+    if (input.status !== "approved") return { customerId: topup.customerId, status: input.status, amount: Number(topup.amount) };
+    const account = (await tx.select().from(walletAccounts).where(eq(walletAccounts.id, topup.walletAccountId)).limit(1))[0];
+    if (!account) throw new Error("محفظة العميل غير موجودة");
+    const nextBalance = Number(account.balance) + Number(topup.amount);
+    await tx.update(walletAccounts).set({ balance: nextBalance.toFixed(2), updatedAt: now }).where(eq(walletAccounts.id, account.id));
+    const transaction = await tx.insert(walletTransactions).values({ walletAccountId: account.id, customerId: topup.customerId, type: "credit", amount: Number(topup.amount).toFixed(2), balanceAfter: nextBalance.toFixed(2), referenceType: "wallet_topup", referenceId: topup.id, note: input.reviewNote?.trim() || "اعتماد طلب شحن المحفظة", createdAt: now });
+    return { customerId: topup.customerId, status: input.status, amount: Number(topup.amount), balanceAfter: nextBalance, transactionId: Number(transaction[0].insertId) };
+  });
+}
+
+export async function upsertUser(user: InsertUser): Promise<void> {
+  if (!user.openId) throw new Error("User openId is required for upsert");
+  const db = await getDb();
+  if (!db) return;
+  const values: InsertUser = { openId: user.openId };
+  const updateSet: Record<string, unknown> = {};
+  const textFields = ["name", "email", "loginMethod"] as const;
+  for (const field of textFields) { if (user[field] !== undefined) { values[field] = user[field] ?? null; updateSet[field] = user[field] ?? null; } }
+  if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
+  if (user.role !== undefined) { values.role = user.role; updateSet.role = user.role; } else if (user.openId === ENV.ownerOpenId) { values.role = "admin"; updateSet.role = "admin"; }
+  if (!values.lastSignedIn) values.lastSignedIn = new Date();
+  if (!Object.keys(updateSet).length) updateSet.lastSignedIn = new Date();
+  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+}
+
+export async function updateUserAvatar(userId: number, avatarUrl: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ avatarUrl, updatedAt: new Date() }).where(eq(users.id, userId));
+  return avatarUrl;
 }
 
 export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
+  const db = await getDb(); if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  return result[0];
 }
 
-// TODO: add feature queries here as your schema grows.
+export async function listRestaurants(restaurantId?: number) { const db = await getDb(); if (!db) return []; return restaurantId ? db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).orderBy(desc(restaurants.createdAt)) : db.select().from(restaurants).orderBy(desc(restaurants.createdAt)); }
+export async function listRestaurantsWithBranchCount() { const db = await getDb(); if (!db) return []; const rows = await db.select().from(restaurants).orderBy(desc(restaurants.createdAt)); const counts = await db.select({ restaurantId: branches.restaurantId, branchCount: count() }).from(branches).groupBy(branches.restaurantId); const countByRestaurant = new Map(counts.map((row) => [row.restaurantId, Number(row.branchCount)])); return rows.map((restaurant) => ({ ...restaurant, branchCount: countByRestaurant.get(restaurant.id) ?? 0 })); }
+export async function getRestaurantById(id: number) { const db = await getDb(); if (!db) return undefined; const result = await db.select().from(restaurants).where(eq(restaurants.id, id)).limit(1); return result[0]; }
+export type MenuLayoutTemplateSnapshot = {
+  menuTemplate: "editorial" | "bistro" | "glass";
+  menuTemplateScheduleJson: string | null;
+  menuTemplateScheduleTimezone: string;
+  glassGlowColor: string;
+  glassCardOpacity: number;
+  menuDisplaySettingsJson: string | null;
+};
+
+export async function listRestaurantMenuLayoutTemplates(restaurantId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(restaurantMenuLayoutTemplates).where(eq(restaurantMenuLayoutTemplates.restaurantId, restaurantId)).orderBy(desc(restaurantMenuLayoutTemplates.updatedAt));
+}
+
+export async function createRestaurantMenuLayoutTemplate(input: { restaurantId: number; name: string; settingsJson: string; createdByUserId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const result = await db.insert(restaurantMenuLayoutTemplates).values({ restaurantId: input.restaurantId, name: input.name, settingsJson: input.settingsJson, createdByUserId: input.createdByUserId ?? null });
+  return Number(result[0].insertId);
+}
+
+export async function deleteRestaurantMenuLayoutTemplate(input: { id: number; restaurantId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(restaurantMenuLayoutTemplates).where(and(eq(restaurantMenuLayoutTemplates.id, input.id), eq(restaurantMenuLayoutTemplates.restaurantId, input.restaurantId)));
+  return input.id;
+}
+
+export async function listPublicContentListings(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: contentListings.id, mediaFileId: contentListings.mediaFileId, title: contentListings.title, description: contentListings.description, contentCategory: contentListings.contentCategory, watermarkEnabled: contentListings.watermarkEnabled, price: contentListings.price, currencyCode: contentListings.currencyCode, status: contentListings.status, publicUrl: mediaFiles.publicUrl, contentType: mediaFiles.contentType, originalName: mediaFiles.originalName }).from(contentListings).innerJoin(mediaFiles, eq(contentListings.mediaFileId, mediaFiles.id)).where(and(eq(contentListings.restaurantId, restaurantId), eq(contentListings.status, "published"), eq(mediaFiles.isDeleted, false))).orderBy(desc(contentListings.createdAt)); }
+export async function listPublicContentMarket() { const db = await getDb(); if (!db) return []; return db.select({ id: contentListings.id, mediaFileId: contentListings.mediaFileId, title: contentListings.title, description: contentListings.description, contentCategory: contentListings.contentCategory, visibility: contentListings.visibility, foodTagsJson: contentListings.foodTagsJson, price: contentListings.price, currencyCode: contentListings.currencyCode, publicUrl: mediaFiles.publicUrl, contentType: mediaFiles.contentType, originalName: mediaFiles.originalName, capturedAt: contentModerationReviews.capturedAt, deviceModel: contentModerationReviews.deviceModel }).from(contentListings).innerJoin(mediaFiles, eq(contentListings.mediaFileId, mediaFiles.id)).innerJoin(contentModerationReviews, eq(contentModerationReviews.mediaFileId, mediaFiles.id)).where(and(isNull(contentListings.restaurantId), eq(contentListings.visibility, "public"), eq(contentListings.status, "published"), eq(contentModerationReviews.status, "approved"), eq(mediaFiles.isDeleted, false), like(mediaFiles.contentType, "image/%"))).orderBy(desc(contentListings.createdAt)); }
+export async function listContentFoodTags() { const db = await getDb(); if (!db) return []; return db.select().from(contentFoodTags).where(eq(contentFoodTags.isActive, true)).orderBy(contentFoodTags.category, contentFoodTags.name); }
+export async function upsertContentFoodTag(input: { id?: number; name: string; slug: string; category: string; isActive?: boolean; createdByUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); if (input.id) { await db.update(contentFoodTags).set({ name: input.name, slug: input.slug, category: input.category, isActive: input.isActive ?? true, updatedAt: new Date() }).where(eq(contentFoodTags.id, input.id)); return input.id; } const result = await db.insert(contentFoodTags).values({ name: input.name, slug: input.slug, category: input.category, isActive: input.isActive ?? true, createdByUserId: input.createdByUserId }); return Number(result[0].insertId); }
+export async function listCustomerContentReviews(ownerUserId: number) { const db = await getDb(); if (!db) return []; return db.select({ mediaId: mediaFiles.id, fileName: mediaFiles.originalName, publicUrl: mediaFiles.publicUrl, contentType: mediaFiles.contentType, sizeBytes: mediaFiles.sizeBytes, moderation: contentModerationReviews, listing: contentListings }).from(mediaFiles).innerJoin(contentModerationReviews, eq(contentModerationReviews.mediaFileId, mediaFiles.id)).leftJoin(contentListings, eq(contentListings.mediaFileId, mediaFiles.id)).where(and(eq(mediaFiles.ownerUserId, ownerUserId), eq(mediaFiles.isDeleted, false))).orderBy(desc(contentModerationReviews.updatedAt)); }
+export async function listPlatformContentReviews() { const db = await getDb(); if (!db) return []; return db.select({ mediaId: mediaFiles.id, ownerUserId: mediaFiles.ownerUserId, fileName: mediaFiles.originalName, publicUrl: mediaFiles.publicUrl, contentType: mediaFiles.contentType, sizeBytes: mediaFiles.sizeBytes, moderation: contentModerationReviews, listing: contentListings }).from(mediaFiles).innerJoin(contentModerationReviews, eq(contentModerationReviews.mediaFileId, mediaFiles.id)).leftJoin(contentListings, eq(contentListings.mediaFileId, mediaFiles.id)).where(and(eq(contentModerationReviews.status, "pending"), eq(mediaFiles.isDeleted, false))).orderBy(desc(contentModerationReviews.createdAt)); }
+export async function updateContentModerationReview(input: { mediaFileId: number; status: "approved" | "blocked"; reason?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(contentModerationReviews).set({ status: input.status, reason: input.reason ?? null, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(contentModerationReviews.mediaFileId, input.mediaFileId)); await db.update(contentListings).set({ status: input.status === "approved" ? "published" : "paused", updatedAt: new Date() }).where(eq(contentListings.mediaFileId, input.mediaFileId)); return input.mediaFileId; }
+export async function getMerchantRestaurantId(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select({ restaurantId: restaurantMembers.restaurantId, roleName: roles.name }).from(restaurantMembers).leftJoin(roles, eq(restaurantMembers.roleId, roles.id)).where(eq(restaurantMembers.userId, userId));
+  const merchant = rows.find((row) => /admin|manager|owner|merchant|تاجر|مدير|مالك|مشرف/i.test(row.roleName ?? ""));
+  return merchant?.restaurantId ?? rows[0]?.restaurantId ?? null;
+}
+
+export async function listContentLibraryForBuyer(buyerUserId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ entitlement: contentPurchaseEntitlements, listing: contentListings, media: mediaFiles, order: contentPurchaseOrders }).from(contentPurchaseEntitlements).innerJoin(contentListings, eq(contentPurchaseEntitlements.listingId, contentListings.id)).innerJoin(mediaFiles, eq(contentPurchaseEntitlements.sourceMediaFileId, mediaFiles.id)).innerJoin(contentPurchaseOrders, eq(contentPurchaseEntitlements.purchaseOrderId, contentPurchaseOrders.id)).where(and(eq(contentPurchaseEntitlements.buyerUserId, buyerUserId), eq(contentPurchaseOrders.status, "approved"), eq(mediaFiles.isDeleted, false))).orderBy(desc(contentPurchaseEntitlements.deliveredAt));
+}
+
+export async function purchaseContentWithWallet(input: { listingId: number; buyerUserId: number; buyerType: "customer" | "merchant"; restaurantId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  return db.transaction(async (tx) => {
+    const row = (await tx.select({ listing: contentListings }).from(contentListings).where(and(eq(contentListings.id, input.listingId), eq(contentListings.status, "published"))).limit(1))[0];
+    if (!row) throw new Error("المحتوى غير متاح للشراء");
+    if (row.listing.ownerUserId === input.buyerUserId) throw new Error("لا يمكن شراء المحتوى من صاحبه");
+    const prior = (await tx.select({ id: contentPurchaseOrders.id }).from(contentPurchaseOrders).where(and(eq(contentPurchaseOrders.buyerUserId, input.buyerUserId), eq(contentPurchaseOrders.status, "approved"), sql`JSON_CONTAINS(${contentPurchaseOrders.itemsJson}, JSON_OBJECT('listingId', ${input.listingId}))`)).limit(1))[0];
+    if (prior) throw new Error("تم شراء هذا المحتوى مسبقًا");
+    const amount = Number(row.listing.price);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("سعر المحتوى غير صالح");
+    const buyer = (await tx.select().from(walletAccounts).where(eq(walletAccounts.customerId, input.buyerUserId)).limit(1))[0];
+    if (!buyer || Number(buyer.balance) < amount) throw new Error("رصيد محفظتك لا يكفي لإتمام الشراء");
+    const now = new Date();
+    const orderResult = await tx.insert(contentPurchaseOrders).values({ restaurantId: input.restaurantId ?? null, buyerUserId: input.buyerUserId, buyerType: input.buyerType, paymentSource: "wallet", paymentMethod: "wallet", paymentStatus: "paid", paidAt: now, customerUserId: input.buyerType === "customer" ? input.buyerUserId : null, itemsJson: JSON.stringify([{ listingId: row.listing.id, title: row.listing.title, price: String(row.listing.price), currencyCode: row.listing.currencyCode }]), total: amount.toFixed(2), currencyCode: row.listing.currencyCode, status: "approved", customerName: null, note: "شراء رقمي من محفظة المحتوى" });
+    const orderId = Number(orderResult[0].insertId);
+    const buyerNext = Number(buyer.balance) - amount;
+    const debitUpdate = await tx.update(walletAccounts).set({ balance: buyerNext.toFixed(2), updatedAt: now }).where(and(eq(walletAccounts.id, buyer.id), gte(walletAccounts.balance, amount.toFixed(2))));
+    if (Number(debitUpdate[0].affectedRows ?? 0) !== 1) throw new Error("تعذر تثبيت خصم المحفظة؛ لم يتم إتمام الشراء");
+    const owner = (await tx.select().from(walletAccounts).where(eq(walletAccounts.customerId, row.listing.ownerUserId)).limit(1))[0];
+    if (!owner) throw new Error("محفظة صانع المحتوى غير متاحة");
+    const reward = Number((amount * 0.8).toFixed(2));
+    const ownerNext = Number(owner.balance) + reward;
+    await tx.update(walletAccounts).set({ balance: ownerNext.toFixed(2), updatedAt: now }).where(eq(walletAccounts.id, owner.id));
+    await tx.insert(walletTransactions).values([{ walletAccountId: buyer.id, customerId: input.buyerUserId, type: "debit", amount: amount.toFixed(2), balanceAfter: buyerNext.toFixed(2), referenceType: "content_purchase", referenceId: orderId, note: "شراء محتوى رقمي من المحفظة", createdAt: now }, { walletAccountId: owner.id, customerId: row.listing.ownerUserId, type: "credit", amount: reward.toFixed(2), balanceAfter: ownerNext.toFixed(2), referenceType: "content_reward", referenceId: orderId, note: "مكافأة بيع محتوى Studio بنسبة 80%", createdAt: now }]);
+    await tx.insert(contentPurchaseEntitlements).values({ purchaseOrderId: orderId, listingId: row.listing.id, sourceMediaFileId: row.listing.mediaFileId, buyerUserId: input.buyerUserId, deliveredAt: now, createdAt: now });
+    return { orderId, amount: amount.toFixed(2), reward: reward.toFixed(2), buyerBalance: buyerNext.toFixed(2), ownerBalance: ownerNext.toFixed(2), deliveredToLibrary: true };
+  });
+}
+
+export async function listRestaurantContentListings(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: contentListings.id, mediaFileId: contentListings.mediaFileId, title: contentListings.title, description: contentListings.description, price: contentListings.price, currencyCode: contentListings.currencyCode, status: contentListings.status, ownerUserId: contentListings.ownerUserId, contentCategory: contentListings.contentCategory, watermarkEnabled: contentListings.watermarkEnabled, publicUrl: mediaFiles.publicUrl, contentType: mediaFiles.contentType, originalName: mediaFiles.originalName }).from(contentListings).innerJoin(mediaFiles, eq(contentListings.mediaFileId, mediaFiles.id)).where(and(eq(contentListings.restaurantId, restaurantId), eq(mediaFiles.isDeleted, false))).orderBy(desc(contentListings.createdAt)); }
+export async function createContentListing(input: { restaurantId: number; mediaFileId: number; ownerUserId: number; title: string; description?: string; contentCategory?: string; watermarkEnabled?: boolean; price: string; currencyCode: string; status?: "draft" | "published" | "paused" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(contentListings).values({ ...input, description: input.description ?? null, contentCategory: input.contentCategory ?? "events", watermarkEnabled: input.watermarkEnabled ?? true, status: input.status ?? "draft" }); return Number(result[0].insertId); }
+
+export async function createContentPurchaseOrder(input: { restaurantId: number; customerUserId?: number | null; buyerUserId?: number | null; buyerType?: "customer" | "merchant"; itemsJson: string; total: string; currencyCode: string; customerName?: string | null; customerPhone?: string | null; note?: string | null; receiptMediaFileId?: number | null; status?: "unpaid" | "verifying" | "approved" | "rejected"; paymentMethod?: "manual" | "bank_transfer" | "card" | "online" | "wallet" | "other"; paymentStatus?: "unpaid" | "pending" | "paid" | "failed" | "partially_refunded" | "refunded" | "cancelled" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const status = input.status ?? "unpaid"; const paymentMethod = input.paymentMethod ?? "manual"; const paymentStatus = input.paymentStatus ?? (status === "approved" ? "paid" : status === "rejected" ? "failed" : status === "verifying" ? "pending" : "unpaid"); const result = await db.insert(contentPurchaseOrders).values({ restaurantId: input.restaurantId, customerUserId: input.customerUserId ?? null, buyerUserId: input.buyerUserId ?? input.customerUserId ?? null, buyerType: input.buyerType ?? "customer", paymentSource: paymentMethod === "wallet" ? "wallet" : "manual", paymentMethod, itemsJson: input.itemsJson, total: input.total, currencyCode: input.currencyCode, customerName: input.customerName ?? null, customerPhone: input.customerPhone ?? null, note: input.note ?? null, receiptMediaFileId: input.receiptMediaFileId ?? null, status, paymentStatus, paidAt: paymentStatus === "paid" ? new Date() : null }); return Number(result[0].insertId); }
+export async function listContentPurchaseOrders(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: contentPurchaseOrders.id, restaurantId: contentPurchaseOrders.restaurantId, customerUserId: contentPurchaseOrders.customerUserId, buyerUserId: contentPurchaseOrders.buyerUserId, buyerType: contentPurchaseOrders.buyerType, paymentSource: contentPurchaseOrders.paymentSource, paymentMethod: contentPurchaseOrders.paymentMethod, paymentStatus: contentPurchaseOrders.paymentStatus, refundAmount: contentPurchaseOrders.refundAmount, paidAt: contentPurchaseOrders.paidAt, refundedAt: contentPurchaseOrders.refundedAt, invoicePrintStatus: contentPurchaseOrders.invoicePrintStatus, invoicePrintedAt: contentPurchaseOrders.invoicePrintedAt, receiptMediaFileId: contentPurchaseOrders.receiptMediaFileId, itemsJson: contentPurchaseOrders.itemsJson, total: contentPurchaseOrders.total, currencyCode: contentPurchaseOrders.currencyCode, status: contentPurchaseOrders.status, customerName: contentPurchaseOrders.customerName, customerPhone: contentPurchaseOrders.customerPhone, note: contentPurchaseOrders.note, receiptExtractedAmount: contentPurchaseOrders.receiptExtractedAmount, receiptExtractedDate: contentPurchaseOrders.receiptExtractedDate, receiptExtractionConfidence: contentPurchaseOrders.receiptExtractionConfidence, receiptExtractedAt: contentPurchaseOrders.receiptExtractedAt, receiptAmountMatch: contentPurchaseOrders.receiptAmountMatch, receiptAmountDifference: contentPurchaseOrders.receiptAmountDifference, rejectionReason: contentPurchaseOrders.rejectionReason, createdAt: contentPurchaseOrders.createdAt, updatedAt: contentPurchaseOrders.updatedAt, receiptUrl: mediaFiles.publicUrl }).from(contentPurchaseOrders).leftJoin(mediaFiles, eq(contentPurchaseOrders.receiptMediaFileId, mediaFiles.id)).where(eq(contentPurchaseOrders.restaurantId, restaurantId)).orderBy(desc(contentPurchaseOrders.createdAt)); }
+export async function updateContentPurchaseOrder(input: { id: number; restaurantId: number; status?: "unpaid" | "verifying" | "approved" | "rejected"; receiptMediaFileId?: number | null; receiptExtractedAmount?: string | null; receiptExtractedDate?: string | null; receiptExtractionConfidence?: string | null; receiptExtractedAt?: Date | null; receiptAmountMatch?: "not_checked" | "matched" | "mismatch" | "unknown"; receiptAmountDifference?: string | null; rejectionReason?: string | null; paymentStatus?: "unpaid" | "pending" | "paid" | "failed" | "partially_refunded" | "refunded" | "cancelled"; paidAt?: Date | null; refundedAt?: Date | null; invoicePrintStatus?: "not_printed" | "queued" | "printed" | "failed"; invoicePrintedAt?: Date | null; invoicePrintError?: string | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(contentPurchaseOrders).set({ ...(input.status ? { status: input.status } : {}), ...(input.receiptMediaFileId !== undefined ? { receiptMediaFileId: input.receiptMediaFileId } : {}), ...(input.receiptExtractedAmount !== undefined ? { receiptExtractedAmount: input.receiptExtractedAmount } : {}), ...(input.receiptExtractedDate !== undefined ? { receiptExtractedDate: input.receiptExtractedDate } : {}), ...(input.receiptExtractionConfidence !== undefined ? { receiptExtractionConfidence: input.receiptExtractionConfidence } : {}), ...(input.receiptExtractedAt !== undefined ? { receiptExtractedAt: input.receiptExtractedAt } : {}), ...(input.receiptAmountMatch !== undefined ? { receiptAmountMatch: input.receiptAmountMatch } : {}), ...(input.receiptAmountDifference !== undefined ? { receiptAmountDifference: input.receiptAmountDifference } : {}), ...(input.rejectionReason !== undefined ? { rejectionReason: input.rejectionReason } : {}), ...(input.paymentStatus !== undefined ? { paymentStatus: input.paymentStatus } : {}), ...(input.paidAt !== undefined ? { paidAt: input.paidAt } : {}), ...(input.refundedAt !== undefined ? { refundedAt: input.refundedAt } : {}), ...(input.invoicePrintStatus !== undefined ? { invoicePrintStatus: input.invoicePrintStatus } : {}), ...(input.invoicePrintedAt !== undefined ? { invoicePrintedAt: input.invoicePrintedAt } : {}), ...(input.invoicePrintError !== undefined ? { invoicePrintError: input.invoicePrintError } : {}), updatedAt: new Date() }).where(and(eq(contentPurchaseOrders.id, input.id), eq(contentPurchaseOrders.restaurantId, input.restaurantId))); return input.id; }
+export async function listCustomerContentPurchaseOrders(customerUserId: number) { const db = await getDb(); if (!db) return []; return db.select({ id: contentPurchaseOrders.id, restaurantId: contentPurchaseOrders.restaurantId, customerUserId: contentPurchaseOrders.customerUserId, buyerUserId: contentPurchaseOrders.buyerUserId, buyerType: contentPurchaseOrders.buyerType, paymentSource: contentPurchaseOrders.paymentSource, paymentMethod: contentPurchaseOrders.paymentMethod, paymentStatus: contentPurchaseOrders.paymentStatus, refundAmount: contentPurchaseOrders.refundAmount, paidAt: contentPurchaseOrders.paidAt, refundedAt: contentPurchaseOrders.refundedAt, invoicePrintStatus: contentPurchaseOrders.invoicePrintStatus, invoicePrintedAt: contentPurchaseOrders.invoicePrintedAt, receiptMediaFileId: contentPurchaseOrders.receiptMediaFileId, itemsJson: contentPurchaseOrders.itemsJson, total: contentPurchaseOrders.total, currencyCode: contentPurchaseOrders.currencyCode, status: contentPurchaseOrders.status, customerName: contentPurchaseOrders.customerName, customerPhone: contentPurchaseOrders.customerPhone, note: contentPurchaseOrders.note, receiptExtractedAmount: contentPurchaseOrders.receiptExtractedAmount, receiptExtractedDate: contentPurchaseOrders.receiptExtractedDate, receiptExtractionConfidence: contentPurchaseOrders.receiptExtractionConfidence, receiptExtractedAt: contentPurchaseOrders.receiptExtractedAt, receiptAmountMatch: contentPurchaseOrders.receiptAmountMatch, receiptAmountDifference: contentPurchaseOrders.receiptAmountDifference, rejectionReason: contentPurchaseOrders.rejectionReason, createdAt: contentPurchaseOrders.createdAt, updatedAt: contentPurchaseOrders.updatedAt, receiptUrl: mediaFiles.publicUrl, restaurantName: restaurants.brandName, restaurantSlug: restaurants.slug }).from(contentPurchaseOrders).innerJoin(restaurants, eq(contentPurchaseOrders.restaurantId, restaurants.id)).leftJoin(mediaFiles, eq(contentPurchaseOrders.receiptMediaFileId, mediaFiles.id)).where(or(eq(contentPurchaseOrders.customerUserId, customerUserId), eq(contentPurchaseOrders.buyerUserId, customerUserId))).orderBy(desc(contentPurchaseOrders.createdAt)); }
+export async function listRestaurantManagerUserIds(restaurantId: number) { const db = await getDb(); if (!db) return []; const rows = await db.select({ userId: restaurantMembers.userId, roleName: roles.name }).from(restaurantMembers).leftJoin(roles, eq(restaurantMembers.roleId, roles.id)).where(eq(restaurantMembers.restaurantId, restaurantId)); const managers = rows.filter((row) => /admin|manager|owner|مدير|مالك|مشرف/i.test(row.roleName ?? "")); const selected = managers.length ? managers : rows; return Array.from(new Set(selected.map((row) => row.userId))); }
+
+export async function getPublicRestaurantPage(slug: string) {
+  const stableRestaurantId = /^\d+$/.test(slug) ? Number(slug) : null; const db = await getDb(); if (!db) return undefined; const restaurant = (await db.select({ id: restaurants.id, slug: restaurants.slug, customDomain: restaurants.customDomain, name: restaurants.name, status: restaurants.status, brandName: restaurants.brandName, brandColor: restaurants.brandColor, brandAccentColor: restaurants.brandAccentColor, brandTextColor: restaurants.brandTextColor, brandFontFamily: restaurants.brandFontFamily, brandHeadingFontFamily: restaurants.brandHeadingFontFamily, themeMode: restaurants.themeMode, themePreset: restaurants.themePreset, menuTemplate: restaurants.menuTemplate, menuTemplateScheduleJson: restaurants.menuTemplateScheduleJson, menuTemplateScheduleTimezone: restaurants.menuTemplateScheduleTimezone, glassGlowColor: restaurants.glassGlowColor, glassCardOpacity: restaurants.glassCardOpacity, brandLogoUrl: restaurants.brandLogoUrl, coverUrl: restaurants.coverUrl, pwaInstallMessage: restaurants.pwaInstallMessage, pwaInstallIconUrl: restaurants.pwaInstallIconUrl, brandDescription: restaurants.brandDescription, customPagesJson: restaurants.customPagesJson, termsOfService: restaurants.termsOfService, privacyPolicy: restaurants.privacyPolicy, refundPolicy: restaurants.refundPolicy, countryCode: restaurants.countryCode, currencyCode: restaurants.currencyCode, currencyDecimals: restaurants.currencyDecimals, phone: restaurants.phone, whatsapp: restaurants.whatsapp, instagramUrl: restaurants.instagramUrl, facebookUrl: restaurants.facebookUrl, tiktokUrl: restaurants.tiktokUrl, websiteUrl: restaurants.websiteUrl, address: restaurants.address, city: restaurants.city, taxNumber: restaurants.taxNumber, locationUrl: restaurants.locationUrl, seoTitle: restaurants.seoTitle, seoDescription: restaurants.seoDescription, seoKeywords: restaurants.seoKeywords, seoHashtags: restaurants.seoHashtags, seoImageUrl: restaurants.seoImageUrl, seoCanonicalUrl: restaurants.seoCanonicalUrl, seoRobots: restaurants.seoRobots, googleSearchConsoleVerification: restaurants.googleSearchConsoleVerification, googleAnalyticsMeasurementId: restaurants.googleAnalyticsMeasurementId, googleTagManagerId: restaurants.googleTagManagerId, structuredDataJson: restaurants.structuredDataJson, primaryLanguage: restaurants.primaryLanguage, timezone: restaurants.timezone, languagesJson: restaurants.languagesJson, reservationEnabled: restaurants.reservationEnabled, reservationMaxPerDay: restaurants.reservationMaxPerDay, reservationDepositEnabled: restaurants.reservationDepositEnabled, reservationDepositAmount: restaurants.reservationDepositAmount, showBranchesOnMenu: restaurants.showBranchesOnMenu, mediaShowcaseEnabled: restaurants.mediaShowcaseEnabled, motionEffectsEnabled: restaurants.motionEffectsEnabled, menuDisplaySettingsJson: restaurants.menuDisplaySettingsJson, manualPaymentMethodsJson: restaurants.manualPaymentMethodsJson, manualPaymentInstructions: restaurants.manualPaymentInstructions, orderModesJson: restaurants.orderModesJson, deliveryManagementMode: restaurants.deliveryManagementMode, platformDeliveryEnabled: restaurants.platformDeliveryEnabled, reservationEventTypesJson: restaurants.reservationEventTypesJson, waiterCallEnabled: restaurants.waiterCallEnabled, waiterCallCooldownMinutes: restaurants.waiterCallCooldownMinutes, reservationHelpText: restaurants.reservationHelpText }).from(restaurants).where(and(or(eq(restaurants.slug, slug), eq(restaurants.barcode, slug), ...(stableRestaurantId ? [eq(restaurants.id, stableRestaurantId)] : [])), ne(restaurants.status, "suspended"))).limit(1))[0]; if (!restaurant) return undefined; const schedule = normalizeMenuTemplateSchedule(restaurant.menuTemplateScheduleJson); const scheduledTemplate = resolveActiveMenuTemplate({ ...schedule, timezone: restaurant.menuTemplateScheduleTimezone || schedule.timezone }); const effectiveRestaurant = { ...restaurant, menuTemplate: scheduledTemplate ?? restaurant.menuTemplate }; const categories = await db.select({ id: menuCategories.id, name: menuCategories.name, imageUrl: menuCategories.imageUrl, translationsJson: menuCategories.translationsJson, sortOrder: menuCategories.sortOrder }).from(menuCategories).where(eq(menuCategories.restaurantId, restaurant.id)); const items = await db.select({ id: menuItems.id, categoryId: menuItems.categoryId, name: menuItems.name, description: menuItems.description, price: menuItems.price, compareAtPrice: menuItems.compareAtPrice, imageUrl: menuItems.imageUrl, additionalImagesJson: menuItems.additionalImagesJson, translationsJson: menuItems.translationsJson, tagsJson: menuItems.tagsJson, prepTimeMinutes: menuItems.prepTimeMinutes, calories: menuItems.calories }).from(menuItems).where(and(eq(menuItems.restaurantId, restaurant.id), eq(menuItems.isAvailable, true))); const publicAddons = await db.select({ id: menuItemAddons.id, menuItemId: menuItemAddons.menuItemId, name: menuItemAddons.name, price: menuItemAddons.price, isAvailable: menuItemAddons.isAvailable, imageUrl: menuItemAddons.imageUrl, translationsJson: menuItemAddons.translationsJson }).from(menuItemAddons).where(and(eq(menuItemAddons.restaurantId, restaurant.id), eq(menuItemAddons.isAvailable, true))); const branchList = await db.select({ id: branches.id, name: branches.name, city: branches.city, latitude: branches.latitude, longitude: branches.longitude, openingTime: branches.openingTime, closingTime: branches.closingTime, operatingWindowsJson: branches.operatingWindowsJson }).from(branches).where(and(eq(branches.restaurantId, restaurant.id), eq(branches.status, "open"))); const owner = (await db.select({ email: users.email }).from(restaurantMembers).innerJoin(users, eq(restaurantMembers.userId, users.id)).where(eq(restaurantMembers.restaurantId, restaurant.id)).limit(1))[0]; const availableTables = await db.select({ id: restaurantTables.id, branchId: restaurantTables.branchId, name: restaurantTables.name, seats: restaurantTables.seats, seatingSectionId: restaurantTables.seatingSectionId }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(restaurantTables.status, "available"), eq(branches.restaurantId, restaurant.id))); const serviceTables = await db.select({ id: restaurantTables.id, branchId: restaurantTables.branchId, name: restaurantTables.name, status: restaurantTables.status, seats: restaurantTables.seats }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(branches.restaurantId, restaurant.id), ne(restaurantTables.status, "available"))); const publicSeatingSections = await db.select({ id: seatingSections.id, branchId: seatingSections.branchId, name: seatingSections.name, seatingType: seatingSections.seatingType, smokingAllowed: seatingSections.smokingAllowed }).from(seatingSections).where(and(eq(seatingSections.restaurantId, restaurant.id), eq(seatingSections.isActive, true))); const publicContentListings = restaurant.mediaShowcaseEnabled ? await listPublicContentListings(restaurant.id) : []; const blackoutDates = await db.select({ id: reservationBlackoutDates.id, branchId: reservationBlackoutDates.branchId, blackoutDate: reservationBlackoutDates.blackoutDate, reason: reservationBlackoutDates.reason }).from(reservationBlackoutDates).where(eq(reservationBlackoutDates.restaurantId, restaurant.id)).orderBy(reservationBlackoutDates.blackoutDate); const publicKitchenSections = await db.select({ id: kitchenSections.id, name: kitchenSections.name }).from(kitchenSections).where(and(eq(kitchenSections.restaurantId, effectiveRestaurant.id), eq(kitchenSections.isEnabled, true))).orderBy(kitchenSections.name); return { restaurant: { ...effectiveRestaurant, email: owner?.email ?? null }, branches: branchList, categories, items, addons: publicAddons, availableTables, seatingSections: publicSeatingSections, kitchenSections: publicKitchenSections, contentListings: publicContentListings, serviceTables, reservationBlackoutDates: blackoutDates }; }
+export async function listPublicRestaurants() { const db = await getDb(); if (!db) return []; return db.select({ id: restaurants.id, name: restaurants.name, slug: restaurants.slug, brandName: restaurants.brandName, brandColor: restaurants.brandColor, brandAccentColor: restaurants.brandAccentColor, brandTextColor: restaurants.brandTextColor, brandFontFamily: restaurants.brandFontFamily, brandHeadingFontFamily: restaurants.brandHeadingFontFamily, brandLogoUrl: restaurants.brandLogoUrl, brandDescription: restaurants.brandDescription, city: restaurants.city, address: restaurants.address, phone: restaurants.phone, reservationEnabled: restaurants.reservationEnabled }).from(restaurants).where(eq(restaurants.status, "active")).orderBy(restaurants.name); }
+export async function listMostActiveRestaurants(limit = 6) {
+  const db = await getDb();
+  if (!db) return [];
+  const safeLimit = Math.max(1, Math.min(24, Math.trunc(limit)));
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const recentOrderCount = count(orders.id);
+  const rows = await db.select({ id: restaurants.id, name: restaurants.name, slug: restaurants.slug, brandName: restaurants.brandName, brandColor: restaurants.brandColor, brandAccentColor: restaurants.brandAccentColor, brandTextColor: restaurants.brandTextColor, brandFontFamily: restaurants.brandFontFamily, brandHeadingFontFamily: restaurants.brandHeadingFontFamily, brandLogoUrl: restaurants.brandLogoUrl, brandDescription: restaurants.brandDescription, city: restaurants.city, address: restaurants.address, phone: restaurants.phone, reservationEnabled: restaurants.reservationEnabled, recentOrderCount }).from(restaurants).leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), gte(orders.createdAt, since))).where(eq(restaurants.status, "active")).groupBy(restaurants.id).orderBy(desc(recentOrderCount), restaurants.name).limit(safeLimit);
+  return rows;
+}
+export async function getRestaurantByBarcode(barcode: string) { const db = await getDb(); if (!db) return undefined; const result = await db.select().from(restaurants).where(eq(restaurants.barcode, barcode)).limit(1); return result[0]; }
+export async function getBranchAllowance(restaurantId: number): Promise<{ plan: string | null; limit: number | null; used: number; canCreate: boolean; source: "subscription" | "unlimited" | "default" | "database_unavailable" }> {
+  const db = await getDb();
+  if (!db) return { plan: null, limit: null, used: 0, canCreate: false, source: "database_unavailable" };
+  const subscription = (await db.select({ plan: subscriptions.plan, status: subscriptions.status }).from(subscriptions).where(and(eq(subscriptions.restaurantId, restaurantId), ne(subscriptions.status, "cancelled"))).orderBy(desc(subscriptions.startedAt)).limit(1))[0];
+  const used = Number((await db.select({ total: count() }).from(branches).where(eq(branches.restaurantId, restaurantId)))[0]?.total ?? 0);
+  const plan = subscription?.plan ?? null;
+  const normalizedPlan = plan?.trim().toLowerCase();
+  const planLimits: Record<string, number | null> = { starter: 1, basic: 3, growth: 5, business: 50, professional: 15, pro: 15, enterprise: null };
+  const limit = normalizedPlan ? (Object.prototype.hasOwnProperty.call(planLimits, normalizedPlan) ? planLimits[normalizedPlan] : 3) : 1;
+  const source = limit === null ? "unlimited" : subscription ? "subscription" : "default";
+  return { plan, limit, used, canCreate: limit === null || used < limit, source };
+}
+
+export async function getEmployeeAllowance(restaurantId: number): Promise<{ plan: string | null; limit: number | null; used: number; canCreate: boolean; source: "subscription" | "unlimited" | "default" | "database_unavailable" }> {
+  const db = await getDb();
+  if (!db) return { plan: null, limit: null, used: 0, canCreate: false, source: "database_unavailable" };
+  const subscription = (await db.select({ plan: subscriptions.plan, status: subscriptions.status }).from(subscriptions).where(and(eq(subscriptions.restaurantId, restaurantId), ne(subscriptions.status, "cancelled"))).orderBy(desc(subscriptions.startedAt)).limit(1))[0];
+  const used = Number((await db.select({ total: count() }).from(employees).where(eq(employees.restaurantId, restaurantId)))[0]?.total ?? 0);
+  const plan = subscription?.plan ?? null;
+  const normalizedPlan = plan?.trim().toLowerCase();
+  const planLimits: Record<string, number | null> = { starter: 5, basic: 15, growth: 50, business: 300, professional: 150, pro: 150, enterprise: null };
+  const limit = normalizedPlan ? (Object.prototype.hasOwnProperty.call(planLimits, normalizedPlan) ? planLimits[normalizedPlan] : 15) : 5;
+  const source = limit === null ? "unlimited" : subscription ? "subscription" : "default";
+  return { plan, limit, used, canCreate: limit === null || used < limit, source };
+}
+
+export type BranchOperatingWindow = { dayOfWeek: number; startTime: string; endTime: string; channels?: string[] };
+export function parseBranchOperatingWindows(raw: string | null | undefined): BranchOperatingWindow[] { if (!raw) return []; try { const parsed = JSON.parse(raw); if (!Array.isArray(parsed)) return []; return parsed.filter((window): window is BranchOperatingWindow => Boolean(window && Number.isInteger(window.dayOfWeek) && window.dayOfWeek >= 0 && window.dayOfWeek <= 6 && typeof window.startTime === "string" && /^\d{2}:\d{2}$/.test(window.startTime) && typeof window.endTime === "string" && /^\d{2}:\d{2}$/.test(window.endTime))); } catch { return []; } }
+export function isBranchAcceptingOrders(branch: { status: string; openingTime?: string | null; closingTime?: string | null; operatingWindowsJson?: string | null }, channel: string, now = new Date()) { if (branch.status !== "open") return false; const formatter = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }); const parts = formatter.formatToParts(now); const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.find((part) => part.type === "weekday")?.value ?? ""); const currentMinutes = Number(parts.find((part) => part.type === "hour")?.value ?? 0) * 60 + Number(parts.find((part) => part.type === "minute")?.value ?? 0); const windows = parseBranchOperatingWindows(branch.operatingWindowsJson); const candidates = windows.length ? windows.filter((window) => window.dayOfWeek === weekday) : (branch.openingTime && branch.closingTime ? [{ dayOfWeek: weekday, startTime: branch.openingTime, endTime: branch.closingTime }] : null); if (!candidates) return true; return candidates.some((window) => { if (window.channels?.length && !window.channels.some((allowedChannel) => allowedChannel === channel || (channel === "dine_in" && allowedChannel === "pos"))) return false; const [startHour, startMinute] = window.startTime.split(":").map(Number); const [endHour, endMinute] = window.endTime.split(":").map(Number); const start = startHour * 60 + startMinute; const end = endHour * 60 + endMinute; return start <= end ? currentMinutes >= start && currentMinutes < end : currentMinutes >= start || currentMinutes < end; }); }
+export function getNextBranchOpeningLabel(branch: { openingTime?: string | null; closingTime?: string | null; operatingWindowsJson?: string | null }, channel: string, now = new Date()) { const windows = parseBranchOperatingWindows(branch.operatingWindowsJson); const formatter = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }); const parts = formatter.formatToParts(now); const currentWeekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.find((part) => part.type === "weekday")?.value ?? ""); const currentMinutes = Number(parts.find((part) => part.type === "hour")?.value ?? 0) * 60 + Number(parts.find((part) => part.type === "minute")?.value ?? 0); const dayLabels = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"]; for (let offset = 0; offset < 8; offset += 1) { const day = (currentWeekday + offset) % 7; const candidates = windows.length ? windows.filter((window) => window.dayOfWeek === day && (!window.channels?.length || window.channels.some((allowedChannel) => allowedChannel === channel || (channel === "dine_in" && allowedChannel === "pos")))) : branch.openingTime && branch.closingTime ? [{ startTime: branch.openingTime, endTime: branch.closingTime }] : []; const next = candidates.find((window) => offset > 0 || Number(window.startTime.slice(0, 2)) * 60 + Number(window.startTime.slice(3)) > currentMinutes); if (next) return `${dayLabels[day]} الساعة ${next.startTime}`; } return null; }
+export async function listBranches(restaurantId: number) { const db = await getDb(); return db ? db.select().from(branches).where(eq(branches.restaurantId, restaurantId)) : []; }
+export async function updateBranchDeliveryLocation(input: { restaurantId: number; branchId: number; latitude: number | null; longitude: number | null; status: "open" | "closed" }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(branches).set({ latitude: input.latitude === null ? null : input.latitude.toFixed(7), longitude: input.longitude === null ? null : input.longitude.toFixed(7), status: input.status }).where(and(eq(branches.id, input.branchId), eq(branches.restaurantId, input.restaurantId))); return input.branchId; }
+export async function listMenuCategories(restaurantId: number) { const db = await getDb(); return db ? db.select().from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId)) : []; }
+export async function listMenuItems(restaurantId?: number, categoryId?: number) { const db = await getDb(); if (!db) return []; if (restaurantId && categoryId) return db.select().from(menuItems).where(and(eq(menuItems.restaurantId, restaurantId), eq(menuItems.categoryId, categoryId))); if (restaurantId) return db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId)); if (categoryId) return db.select().from(menuItems).where(eq(menuItems.categoryId, categoryId)); return db.select().from(menuItems); }
+export async function listOrders(branchId: number, restaurantId?: number) { const db = await getDb(); if (!db) return []; const filters = [eq(orders.branchId, branchId)]; if (restaurantId) filters.push(eq(orders.restaurantId, restaurantId)); return db.select().from(orders).where(and(...filters)).orderBy(desc(orders.createdAt)); }
+export async function listOrdersByRestaurant(restaurantId: number, limit = 200) {
+  const db = await getDb();
+  if (!db) return [];
+  const safeLimit = Math.max(25, Math.min(500, Math.trunc(limit)));
+  const rows = await db.select({ id: orders.id, restaurantId: orders.restaurantId, branchId: orders.branchId, kitchenSectionId: orders.kitchenSectionId, customerId: orders.customerId, driverId: orders.driverId, guestName: orders.guestName, guestPhone: orders.guestPhone, tableName: orders.tableName, channel: orders.channel, notes: orders.notes, cashierNotes: orders.cashierNotes, deliveryNote: orders.deliveryNote, reservationDate: orders.reservationDate, reservationEventType: orders.reservationEventType, partySize: orders.partySize, childrenCount: orders.childrenCount, splitBillMode: orders.splitBillMode, paymentMethod: orders.paymentMethod, paymentStatus: orders.paymentStatus, currencyCode: orders.currencyCode, total: orders.total, status: orders.status, createdAt: orders.createdAt, updatedAt: orders.updatedAt }).from(orders).innerJoin(branches, eq(orders.branchId, branches.id)).where(and(eq(orders.restaurantId, restaurantId), eq(branches.restaurantId, restaurantId))).orderBy(desc(orders.createdAt)).limit(safeLimit);
+  if (!rows.length) return rows.map((order) => ({ ...order, items: [] as { orderItemId: number; menuItemId: number; itemName: string; quantity: number; unitPrice: string; categoryName: string | null }[] }));
+  const items = await db.select({ orderItemId: orderItems.id, orderId: orderItems.orderId, menuItemId: orderItems.menuItemId, itemName: menuItems.name, quantity: orderItems.quantity, unitPrice: orderItems.unitPrice, categoryName: menuCategories.name }).from(orderItems).innerJoin(menuItems, eq(orderItems.menuItemId, menuItems.id)).leftJoin(menuCategories, eq(menuItems.categoryId, menuCategories.id)).where(and(eq(menuItems.restaurantId, restaurantId), inArray(orderItems.orderId, rows.map((order) => order.id))));
+  const itemsByOrder = new Map<number, typeof items>();
+  for (const item of items) itemsByOrder.set(item.orderId, [...(itemsByOrder.get(item.orderId) ?? []), item]);
+  return rows.map((order) => ({ ...order, items: itemsByOrder.get(order.id) ?? [] }));
+}
+export async function listOrdersForWaiter(input: { restaurantId: number; branchId: number; waiterUserId: number; limit?: number }) { const assignedTables = await listTablesForWaiter({ restaurantId: input.restaurantId, branchId: input.branchId, waiterUserId: input.waiterUserId }); const assignedNames = new Set(assignedTables.map((table) => table.name)); const ordersForRestaurant = await listOrdersByRestaurant(input.restaurantId, input.limit ?? 200); return ordersForRestaurant.filter((order) => order.branchId === input.branchId && typeof order.tableName === "string" && assignedNames.has(order.tableName)); }
+
+const BAR_SECTION_TOKENS = ["bar", "مشروبات", "مشروب", "بار", "قهوة", "كوفي", "عصائر", "coffee", "beverage", "juice"];
+export function isBarKitchenSectionName(name: string) { const normalized = name.trim().toLocaleLowerCase(); return BAR_SECTION_TOKENS.some((token) => normalized.includes(token)); }
+
+export async function syncMenuCategoriesToKitchenSections(restaurantId: number) {
+  const db = await getDb(); if (!db) return [];
+  const [categories, sections] = await Promise.all([
+    db.select({ id: menuCategories.id, name: menuCategories.name, kitchenSectionId: menuCategories.kitchenSectionId }).from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId)),
+    db.select({ id: kitchenSections.id, name: kitchenSections.name }).from(kitchenSections).where(eq(kitchenSections.restaurantId, restaurantId)),
+  ]);
+  const sectionByName = new Map(sections.map((section) => [section.name.trim().toLocaleLowerCase(), section]));
+  const created: Array<{ id: number; name: string }> = [];
+  for (const category of categories) {
+    const normalizedName = category.name.trim().toLocaleLowerCase();
+    if (!normalizedName) continue;
+    let section = sectionByName.get(normalizedName);
+    if (!section) {
+      const result = await db.insert(kitchenSections).values({ restaurantId, name: category.name.trim(), printerType: "none", isEnabled: true });
+      section = { id: Number(result[0].insertId), name: category.name.trim() };
+      sectionByName.set(normalizedName, section);
+      created.push(section);
+    }
+    if (!category.kitchenSectionId) await db.update(menuCategories).set({ kitchenSectionId: section.id }).where(and(eq(menuCategories.id, category.id), eq(menuCategories.restaurantId, restaurantId)));
+  }
+  return [...sections, ...created];
+}
+
+export async function listKitchenSectionsWithSla(restaurantId: number) {
+  await syncMenuCategoriesToKitchenSections(restaurantId);
+  const db = await getDb(); if (!db) return [];
+  return db.select({ id: kitchenSections.id, name: kitchenSections.name, isEnabled: kitchenSections.isEnabled, thresholdMinutes: kitchenSectionSla.thresholdMinutes })
+    .from(kitchenSections).leftJoin(kitchenSectionSla, and(eq(kitchenSectionSla.kitchenSectionId, kitchenSections.id), eq(kitchenSectionSla.restaurantId, restaurantId)))
+    .where(eq(kitchenSections.restaurantId, restaurantId)).orderBy(kitchenSections.name);
+}
+export async function saveKitchenSectionSla(input: { restaurantId: number; kitchenSectionId: number; thresholdMinutes: number; updatedByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const section = (await db.select({ id: kitchenSections.id }).from(kitchenSections).where(and(eq(kitchenSections.id, input.kitchenSectionId), eq(kitchenSections.restaurantId, input.restaurantId))).limit(1))[0];
+  if (!section) throw new Error("قسم المطبخ غير مرتبط بالمطعم");
+  const existing = (await db.select({ id: kitchenSectionSla.id }).from(kitchenSectionSla).where(and(eq(kitchenSectionSla.restaurantId, input.restaurantId), eq(kitchenSectionSla.kitchenSectionId, input.kitchenSectionId))).limit(1))[0];
+  if (existing) { await db.update(kitchenSectionSla).set({ thresholdMinutes: input.thresholdMinutes, updatedByUserId: input.updatedByUserId, updatedAt: new Date() }).where(eq(kitchenSectionSla.id, existing.id)); return existing.id; }
+  const result = await db.insert(kitchenSectionSla).values(input); return Number(result[0].insertId);
+}
+export async function listOrderStatusHistory(orderId: number, restaurantId: number) {
+  const db = await getDb(); if (!db) return [];
+  return db.select().from(orderStatusHistory).where(and(eq(orderStatusHistory.orderId, orderId), eq(orderStatusHistory.restaurantId, restaurantId))).orderBy(orderStatusHistory.createdAt);
+}
+export async function recordOrderStatusTransition(input: { restaurantId: number; orderId: number; fromStatus?: string | null; toStatus: string; actorUserId?: number | null; at?: Date }) {
+  const db = await getDb(); if (!db) return null;
+  const at = input.at ?? new Date();
+  const previous = (await db.select({ createdAt: orderStatusHistory.createdAt }).from(orderStatusHistory).where(and(eq(orderStatusHistory.orderId, input.orderId), eq(orderStatusHistory.restaurantId, input.restaurantId))).orderBy(desc(orderStatusHistory.createdAt)).limit(1))[0];
+  const durationSeconds = previous?.createdAt ? Math.max(0, Math.round((at.getTime() - new Date(previous.createdAt).getTime()) / 1000)) : null;
+  const result = await db.insert(orderStatusHistory).values({ restaurantId: input.restaurantId, orderId: input.orderId, fromStatus: input.fromStatus ?? null, toStatus: input.toStatus, actorUserId: input.actorUserId ?? null, durationSeconds, createdAt: at });
+  return Number(result[0].insertId);
+}
+export async function getDailyOrderPerformance(restaurantId: number, from: Date, to: Date) {
+  const db = await getDb(); if (!db) return { currency: { countryCode: "SA", currencyCode: "SAR", currencyDecimals: 2, currencyCodes: ["SAR"] }, summary: { total: 0, completed: 0, delayed: 0, averagePreparationSeconds: 0 }, orders: [], bySection: [], byHour: [] };
+  const restaurantConfig = (await db.select({ countryCode: restaurants.countryCode, currencyCode: restaurants.currencyCode, currencyDecimals: restaurants.currencyDecimals }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1))[0];
+  const slaRows = await db.select({ kitchenSectionId: kitchenSectionSla.kitchenSectionId, thresholdMinutes: kitchenSectionSla.thresholdMinutes }).from(kitchenSectionSla).where(eq(kitchenSectionSla.restaurantId, restaurantId));
+  const thresholdBySection = new Map(slaRows.map((row) => [row.kitchenSectionId, Number(row.thresholdMinutes)]));
+  const rows = await db.select({ id: orders.id, status: orders.status, createdAt: orders.createdAt, updatedAt: orders.updatedAt, countryCode: orders.countryCode, currencyCode: orders.currencyCode, currencyDecimals: orders.currencyDecimals, kitchenSectionId: orders.kitchenSectionId, sectionName: kitchenSections.name, historyId: orderStatusHistory.id, fromStatus: orderStatusHistory.fromStatus, toStatus: orderStatusHistory.toStatus, durationSeconds: orderStatusHistory.durationSeconds, transitionAt: orderStatusHistory.createdAt })
+    .from(orders).leftJoin(kitchenSections, eq(orders.kitchenSectionId, kitchenSections.id)).leftJoin(orderStatusHistory, and(eq(orderStatusHistory.orderId, orders.id), eq(orderStatusHistory.restaurantId, restaurantId)))
+    .where(and(eq(orders.restaurantId, restaurantId), gte(orders.createdAt, from), lte(orders.createdAt, to))).orderBy(desc(orders.createdAt), orderStatusHistory.createdAt);
+  const grouped = new Map<number, { id: number; status: string; createdAt: Date; updatedAt: Date; countryCode: string; currencyCode: string; currencyDecimals: number; kitchenSectionId: number | null; sectionName: string | null; transitions: typeof rows }>();
+  for (const row of rows) { const current = grouped.get(row.id); if (current) current.transitions.push(row); else grouped.set(row.id, { id: row.id, status: row.status, createdAt: row.createdAt, updatedAt: row.updatedAt, countryCode: row.countryCode ?? restaurantConfig?.countryCode ?? "SA", currencyCode: row.currencyCode ?? restaurantConfig?.currencyCode ?? "SAR", currencyDecimals: Number(row.currencyDecimals ?? restaurantConfig?.currencyDecimals ?? 2), kitchenSectionId: row.kitchenSectionId ?? null, sectionName: row.sectionName ?? null, transitions: [row] }); }
+  const ordersOut = Array.from(grouped.values()).map((order) => { const transitions = order.transitions.filter((item) => item.historyId); const prepStart = transitions.find((item) => item.toStatus === "preparing")?.transitionAt ?? order.createdAt; const completedAt = transitions.find((item) => item.toStatus === "completed")?.transitionAt; const preparationSeconds = completedAt ? Math.max(0, Math.round((new Date(completedAt).getTime() - new Date(prepStart).getTime()) / 1000)) : 0; const thresholdMinutes = thresholdBySection.get(order.kitchenSectionId ?? -1) ?? 15; const delayed = transitions.some((item) => Number(item.durationSeconds ?? 0) > thresholdMinutes * 60 && ["new", "preparing"].includes(item.toStatus ?? "")); return { id: order.id, status: order.status, createdAt: order.createdAt, updatedAt: order.updatedAt, countryCode: order.countryCode, currencyCode: order.currencyCode, currencyDecimals: order.currencyDecimals, kitchenSectionId: order.kitchenSectionId, sectionName: order.sectionName, thresholdMinutes, delayed, preparationSeconds, transitions }; });
+  const completed = ordersOut.filter((order) => order.status === "completed"); const delayed = ordersOut.filter((order) => order.delayed).length;
+  const averagePreparationSeconds = completed.length ? Math.round(completed.reduce((sum, order) => sum + order.preparationSeconds, 0) / completed.length) : 0;
+  const sectionStats = new Map<string, { sectionId: number | null; sectionName: string; orders: number; delayed: number; completed: number; preparationSeconds: number; preparationSamples: number }>();
+  const hourStats = new Map<number, { hour: number; orders: number; delayed: number; preparationSeconds: number; preparationSamples: number }>();
+  for (const order of ordersOut) { const sectionKey = order.kitchenSectionId ? String(order.kitchenSectionId) : "unassigned"; const section = sectionStats.get(sectionKey) ?? { sectionId: order.kitchenSectionId, sectionName: order.sectionName ?? "غير موزع", orders: 0, delayed: 0, completed: 0, preparationSeconds: 0, preparationSamples: 0 }; section.orders += 1; section.delayed += order.delayed ? 1 : 0; section.completed += order.status === "completed" ? 1 : 0; if (order.preparationSeconds > 0) { section.preparationSeconds += order.preparationSeconds; section.preparationSamples += 1; } sectionStats.set(sectionKey, section); const hour = new Date(order.createdAt).getHours(); const hourly = hourStats.get(hour) ?? { hour, orders: 0, delayed: 0, preparationSeconds: 0, preparationSamples: 0 }; hourly.orders += 1; hourly.delayed += order.delayed ? 1 : 0; if (order.preparationSeconds > 0) { hourly.preparationSeconds += order.preparationSeconds; hourly.preparationSamples += 1; } hourStats.set(hour, hourly); }
+  const bySection = Array.from(sectionStats.values()).map((item) => ({ ...item, averagePreparationSeconds: item.preparationSamples ? Math.round(item.preparationSeconds / item.preparationSamples) : 0 }));
+  const byHour = Array.from(hourStats.values()).sort((a, b) => a.hour - b.hour).map((item) => ({ ...item, averagePreparationSeconds: item.preparationSamples ? Math.round(item.preparationSeconds / item.preparationSamples) : 0 }));
+  const currencyCodes = Array.from(new Set(ordersOut.map((order) => order.currencyCode))); return { currency: { countryCode: restaurantConfig?.countryCode ?? "SA", currencyCode: restaurantConfig?.currencyCode ?? "SAR", currencyDecimals: Number(restaurantConfig?.currencyDecimals ?? 2), currencyCodes: currencyCodes.length ? currencyCodes : [restaurantConfig?.currencyCode ?? "SAR"] }, summary: { total: ordersOut.length, completed: completed.length, delayed, averagePreparationSeconds }, orders: ordersOut, bySection, byHour };
+}
+export async function listInventory(restaurantId: number) { const db = await getDb(); return db ? db.select().from(inventoryItems).where(eq(inventoryItems.restaurantId, restaurantId)) : []; }
+export async function listEmployees(restaurantId: number) { const db = await getDb(); return db ? db.select().from(employees).where(eq(employees.restaurantId, restaurantId)) : []; }
+export async function listSubscriptions(restaurantId?: number) { const db = await getDb(); return db ? (restaurantId ? db.select().from(subscriptions).where(eq(subscriptions.restaurantId, restaurantId)) : db.select().from(subscriptions)) : []; }
+export async function listRoles(restaurantId?: number) { const db = await getDb(); return db ? (restaurantId ? db.select().from(roles).where(eq(roles.restaurantId, restaurantId)) : db.select().from(roles)) : []; }
+export async function listPermissions() { const db = await getDb(); return db ? db.select().from(permissions) : []; }
+export async function listTables(branchId: number, restaurantId?: number) { const db = await getDb(); if (!db) return []; if (!restaurantId) return db.select().from(restaurantTables).where(eq(restaurantTables.branchId, branchId)); return db.select({ id: restaurantTables.id, branchId: restaurantTables.branchId, name: restaurantTables.name, seats: restaurantTables.seats, status: restaurantTables.status, tableType: restaurantTables.tableType, minimumCharge: restaurantTables.minimumCharge, tableFee: restaurantTables.tableFee }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(restaurantTables.branchId, branchId), eq(branches.restaurantId, restaurantId))); }
+
+export async function listTablesForWaiter(input: { restaurantId: number; branchId: number; waiterUserId: number }) { const db = await getDb(); if (!db) return []; return db.select({ id: restaurantTables.id, branchId: restaurantTables.branchId, name: restaurantTables.name, seats: restaurantTables.seats, status: restaurantTables.status, tableType: restaurantTables.tableType, minimumCharge: restaurantTables.minimumCharge, tableFee: restaurantTables.tableFee }).from(waiterTableAssignments).innerJoin(restaurantTables, eq(waiterTableAssignments.tableId, restaurantTables.id)).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(waiterTableAssignments.restaurantId, input.restaurantId), eq(waiterTableAssignments.branchId, input.branchId), eq(waiterTableAssignments.waiterUserId, input.waiterUserId), eq(restaurantTables.branchId, input.branchId), eq(branches.restaurantId, input.restaurantId))).orderBy(restaurantTables.name); }
+
+export async function replaceWaiterTableAssignments(input: { restaurantId: number; branchId: number; waiterUserId: number; tableIds: number[]; assignedByUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const uniqueTableIds = Array.from(new Set(input.tableIds)); const validTables = uniqueTableIds.length ? await db.select({ id: restaurantTables.id }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(inArray(restaurantTables.id, uniqueTableIds), eq(restaurantTables.branchId, input.branchId), eq(branches.restaurantId, input.restaurantId))) : []; if (validTables.length !== uniqueTableIds.length) throw new Error("يوجد جدول غير مرتبط بالفرع المحدد"); await db.transaction(async (tx) => { await tx.delete(waiterTableAssignments).where(and(eq(waiterTableAssignments.restaurantId, input.restaurantId), eq(waiterTableAssignments.branchId, input.branchId), eq(waiterTableAssignments.waiterUserId, input.waiterUserId))); if (uniqueTableIds.length) await tx.insert(waiterTableAssignments).values(uniqueTableIds.map((tableId) => ({ restaurantId: input.restaurantId, branchId: input.branchId, waiterUserId: input.waiterUserId, tableId, assignedByUserId: input.assignedByUserId }))); }); return { assignedTableIds: uniqueTableIds }; }
+
+export async function isWaiterAssignedToTable(input: { restaurantId: number; branchId: number; waiterUserId: number; tableId: number }) { const db = await getDb(); if (!db) return false; const rows = await db.select({ id: waiterTableAssignments.id }).from(waiterTableAssignments).where(and(eq(waiterTableAssignments.restaurantId, input.restaurantId), eq(waiterTableAssignments.branchId, input.branchId), eq(waiterTableAssignments.waiterUserId, input.waiterUserId), eq(waiterTableAssignments.tableId, input.tableId))).limit(1); return rows.length > 0; }
+
+export async function createWaiterCall(input: { restaurantId: number; branchId: number; tableName: string; reason: string; customerName?: string | null }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const restaurant = (await db.select({ waiterCallEnabled: restaurants.waiterCallEnabled, waiterCallCooldownMinutes: restaurants.waiterCallCooldownMinutes }).from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+  if (!restaurant?.waiterCallEnabled) throw new Error("نداء النادل غير متاح حاليًا");
+  const cooldownMinutes = Math.max(1, Math.min(120, Number(restaurant.waiterCallCooldownMinutes ?? 10)));
+  const table = (await db.select({ id: restaurantTables.id, name: restaurantTables.name, status: restaurantTables.status }).from(restaurantTables).innerJoin(branches, eq(restaurantTables.branchId, branches.id)).where(and(eq(restaurantTables.branchId, input.branchId), eq(branches.restaurantId, input.restaurantId), eq(restaurantTables.name, input.tableName.trim()))).limit(1))[0];
+  if (!table) throw new Error("الطاولة غير موجودة في هذا الفرع");
+  if (table.status === "available") throw new Error("لا يمكن إرسال نداء إلى طاولة غير مفتوحة");
+  const assignments = await db.select({ waiterUserId: waiterTableAssignments.waiterUserId, waiterName: users.name }).from(waiterTableAssignments).innerJoin(users, eq(waiterTableAssignments.waiterUserId, users.id)).where(and(eq(waiterTableAssignments.restaurantId, input.restaurantId), eq(waiterTableAssignments.branchId, input.branchId), eq(waiterTableAssignments.tableId, table.id))).orderBy(users.name);
+  if (!assignments.length) throw new Error("لا يوجد نادل معيّن لهذه الطاولة");
+  const since = new Date(Date.now() - cooldownMinutes * 60_000);
+  const recent = (await db.select({ createdAt: waiterCalls.createdAt }).from(waiterCalls).where(and(eq(waiterCalls.restaurantId, input.restaurantId), eq(waiterCalls.branchId, input.branchId), eq(waiterCalls.tableId, table.id), inArray(waiterCalls.status, ["active", "acknowledged"]), gte(waiterCalls.createdAt, since))).orderBy(desc(waiterCalls.createdAt)).limit(1))[0];
+  if (recent) { const availableAt = new Date(recent.createdAt.getTime() + cooldownMinutes * 60_000); throw new Error(`تم إرسال نداء لهذه الطاولة مؤخرًا. يمكنك المحاولة بعد ${availableAt.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`); }
+  const now = new Date();
+  const publicToken = nanoid(32);
+  const created = await db.transaction(async (tx) => {
+    const rows: Array<{ id: number; waiterUserId: number; waiterName: string | null }> = [];
+    for (const assignment of assignments) {
+      const result = await tx.insert(waiterCalls).values({ restaurantId: input.restaurantId, branchId: input.branchId, tableId: table.id, waiterUserId: assignment.waiterUserId, reason: input.reason.trim(), customerName: input.customerName?.trim() || null, publicToken, status: "active", createdAt: now });
+      const id = Number(result[0].insertId);
+      rows.push({ id, waiterUserId: assignment.waiterUserId, waiterName: assignment.waiterName });
+      await tx.insert(notifications).values({ userId: assignment.waiterUserId, type: "message", title: "نداء من طاولة", body: `${table.name} · ${input.reason.trim()}${input.customerName?.trim() ? ` · ${input.customerName.trim()}` : ""}` });
+    }
+    return rows;
+  });
+  void Promise.all(created.map((call) => sendPushToUser(call.waiterUserId, { title: "نداء من طاولة", body: `${table.name} · ${input.reason.trim()}`, url: "/" }))).catch((error) => console.warn("[Push] waiter call failed", error));
+  return { success: true, publicToken, tableId: table.id, tableName: table.name, cooldownMinutes, availableAt: new Date(now.getTime() + cooldownMinutes * 60_000), waiters: created };
+}
+
+export async function listWaiterCallsForUser(input: { restaurantId: number; branchId?: number; waiterUserId: number }) { const db = await getDb(); if (!db) return []; return db.select({ id: waiterCalls.id, tableId: waiterCalls.tableId, tableName: restaurantTables.name, reason: waiterCalls.reason, status: waiterCalls.status, customerName: waiterCalls.customerName, createdAt: waiterCalls.createdAt, acknowledgedAt: waiterCalls.acknowledgedAt, closedAt: waiterCalls.closedAt }).from(waiterCalls).innerJoin(restaurantTables, eq(waiterCalls.tableId, restaurantTables.id)).where(and(eq(waiterCalls.restaurantId, input.restaurantId), input.branchId ? eq(waiterCalls.branchId, input.branchId) : undefined, eq(waiterCalls.waiterUserId, input.waiterUserId), inArray(waiterCalls.status, ["active", "acknowledged"]))).orderBy(desc(waiterCalls.createdAt)).limit(50); }
+export async function acknowledgeWaiterCall(input: { id: number; restaurantId: number; waiterUserId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(waiterCalls).set({ status: "acknowledged", acknowledgedAt: new Date() }).where(and(eq(waiterCalls.id, input.id), eq(waiterCalls.restaurantId, input.restaurantId), eq(waiterCalls.waiterUserId, input.waiterUserId), eq(waiterCalls.status, "active"))); return input.id; }
+export async function getWaiterResponseStats(input: { restaurantId: number; branchId?: number }) { const db = await getDb(); if (!db) return []; const rows = await db.select({ waiterUserId: waiterCalls.waiterUserId, waiterName: users.name, createdAt: waiterCalls.createdAt, acknowledgedAt: waiterCalls.acknowledgedAt }).from(waiterCalls).innerJoin(users, eq(waiterCalls.waiterUserId, users.id)).where(and(eq(waiterCalls.restaurantId, input.restaurantId), input.branchId ? eq(waiterCalls.branchId, input.branchId) : undefined, isNotNull(waiterCalls.acknowledgedAt))).orderBy(desc(waiterCalls.acknowledgedAt)); const grouped = new Map<number, { waiterUserId: number; waiterName: string | null; totalCalls: number; totalResponseMs: number; lastAcknowledgedAt: Date | null }>(); for (const row of rows) { if (!row.acknowledgedAt) continue; const responseMs = Math.max(0, row.acknowledgedAt.getTime() - row.createdAt.getTime()); const current = grouped.get(row.waiterUserId) ?? { waiterUserId: row.waiterUserId, waiterName: row.waiterName, totalCalls: 0, totalResponseMs: 0, lastAcknowledgedAt: null }; current.totalCalls += 1; current.totalResponseMs += responseMs; if (!current.lastAcknowledgedAt || row.acknowledgedAt > current.lastAcknowledgedAt) current.lastAcknowledgedAt = row.acknowledgedAt; grouped.set(row.waiterUserId, current); } return Array.from(grouped.values()).map((item) => ({ waiterUserId: item.waiterUserId, waiterName: item.waiterName, totalCalls: item.totalCalls, averageResponseSeconds: Math.round(item.totalResponseMs / item.totalCalls / 1000), lastAcknowledgedAt: item.lastAcknowledgedAt })); }
+export async function getPublicWaiterCallStatus(publicToken: string) { const db = await getDb(); if (!db) return null; const rows = await db.select({ status: waiterCalls.status, tableName: restaurantTables.name, acknowledgedAt: waiterCalls.acknowledgedAt, createdAt: waiterCalls.createdAt }).from(waiterCalls).innerJoin(restaurantTables, eq(waiterCalls.tableId, restaurantTables.id)).where(eq(waiterCalls.publicToken, publicToken)).orderBy(desc(waiterCalls.createdAt)).limit(8); if (!rows.length) return null; const status = rows.some((row) => row.status === "acknowledged") ? "acknowledged" : rows.some((row) => row.status === "active") ? "active" : rows[0].status; return { status, tableName: rows[0].tableName, acknowledgedAt: rows.find((row) => row.acknowledgedAt)?.acknowledgedAt ?? null, createdAt: rows[0].createdAt }; }
+export async function closeActiveWaiterCallsForTable(input: { restaurantId: number; branchId: number; tableId: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.update(waiterCalls).set({ status: "closed", closedAt: new Date() }).where(and(eq(waiterCalls.restaurantId, input.restaurantId), eq(waiterCalls.branchId, input.branchId), eq(waiterCalls.tableId, input.tableId), inArray(waiterCalls.status, ["active", "acknowledged"]))); return Number(result[0].affectedRows ?? 0); }
+export async function listPurchases(restaurantId: number) { const db = await getDb(); return db ? db.select().from(purchases).where(eq(purchases.restaurantId, restaurantId)).orderBy(desc(purchases.createdAt)) : []; }
+export async function listAttendance(employeeId?: number, restaurantId?: number) { const db = await getDb(); if (!db) return []; const filters = []; if (employeeId) filters.push(eq(attendance.employeeId, employeeId)); if (restaurantId) filters.push(eq(employees.restaurantId, restaurantId)); const query = db.select({ id: attendance.id, employeeId: attendance.employeeId, workDate: attendance.workDate, status: attendance.status }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)); return filters.length ? query.where(and(...filters)) : query; }
+export async function listCampaigns(restaurantId: number) { const db = await getDb(); return db ? db.select().from(campaigns).where(eq(campaigns.restaurantId, restaurantId)) : []; }
+export async function listCoupons(campaignId?: number, restaurantId?: number) { const db = await getDb(); if (!db) return []; const filters = []; if (campaignId) filters.push(eq(coupons.campaignId, campaignId)); if (restaurantId) filters.push(eq(campaigns.restaurantId, restaurantId)); const query = db.select({ id: coupons.id, campaignId: coupons.campaignId, code: coupons.code, discountPercent: coupons.discountPercent, usageLimit: coupons.usageLimit, usedCount: coupons.usedCount }).from(coupons).innerJoin(campaigns, eq(coupons.campaignId, campaigns.id)); return filters.length ? query.where(and(...filters)) : query; }
+export async function listRemoteWorkers(restaurantId: number) { const db = await getDb(); if (!db) return []; const workers = await db.select().from(remoteWorkers).where(eq(remoteWorkers.restaurantId, restaurantId)); const activeOrders = await db.select({ driverId: orders.driverId, total: count() }).from(orders).where(and(eq(orders.restaurantId, restaurantId), inArray(orders.deliveryStatus, ["assigned", "picked_up", "out_for_delivery"]))).groupBy(orders.driverId); const activeByDriver = new Map(activeOrders.filter((row) => row.driverId !== null).map((row) => [row.driverId!, Number(row.total)])); return workers.map((worker) => { const activeOrderCount = activeByDriver.get(worker.userId) ?? 0; const lastSeen = worker.lastLocationAt ? new Date(worker.lastLocationAt).getTime() : 0; const isOnline = lastSeen > 0 && Date.now() - lastSeen <= 10 * 60 * 1000; const currentStatus = !isOnline ? "offline" as const : activeOrderCount > 0 ? "busy" as const : worker.isAvailable ? "available" as const : "offline" as const; return { ...worker, activeOrderCount, currentStatus }; }); }
+export async function listRemoteTasks(restaurantId: number) { const db = await getDb(); return db ? db.select().from(remoteTasks).where(eq(remoteTasks.restaurantId, restaurantId)).orderBy(desc(remoteTasks.createdAt)) : []; }
+export async function listTaskMessages(taskId: number) { const db = await getDb(); return db ? db.select().from(taskMessages).where(eq(taskMessages.taskId, taskId)).orderBy(taskMessages.createdAt) : []; }
+export async function listNotifications(userId: number) { const db = await getDb(); return db ? db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt)) : []; }
+export async function markAllNotificationsRead(userId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.userId, userId), isNull(notifications.readAt))); return { updated: result[0].affectedRows ?? 0 }; }
+export async function deleteAllNotifications(userId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.delete(notifications).where(eq(notifications.userId, userId)); return { deleted: result[0].affectedRows ?? 0 }; }
+export async function getTestAccountByEmail(email: string) { const db = await getDb(); if (!db) return undefined; const rows = await db.select().from(testAccounts).where(eq(testAccounts.email, email.toLowerCase())).limit(1); return rows[0]; }
+export async function listManagedTestAccounts() { const db = await getDb(); if (!db) return []; return db.select({ id: testAccounts.id, restaurantId: testAccounts.restaurantId, email: testAccounts.email, displayName: testAccounts.displayName, role: testAccounts.role, isActive: testAccounts.isActive, createdAt: testAccounts.createdAt }).from(testAccounts).orderBy(testAccounts.role, testAccounts.displayName); }
+export async function updateManagedTestAccount(id: number, changes: { email?: string; displayName?: string; role?: "admin" | "restaurant_admin" | "waiter" | "kitchen" | "bar" | "cashier" | "customer" | "driver"; isActive?: boolean; passwordHash?: string }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = (await db.select({ id: testAccounts.id }).from(testAccounts).where(eq(testAccounts.id, id)).limit(1))[0]; if (!existing) return false; await db.update(testAccounts).set(changes).where(eq(testAccounts.id, id)); return true; }
+export async function getManagedTestAccount(id: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(testAccounts).where(eq(testAccounts.id, id)).limit(1))[0]; }
+export async function getTestAccountById(id: number) { const db = await getDb(); if (!db) return undefined; const rows = await db.select().from(testAccounts).where(eq(testAccounts.id, id)).limit(1); return rows[0]; }
+export async function listAuthSessions(userId: number) { const db = await getDb(); return db ? db.select().from(authSessions).where(eq(authSessions.userId, userId)).orderBy(desc(authSessions.lastSeenAt)) : []; }
+export async function listFeatureDefinitions() { const db = await getDb(); return db ? db.select().from(featureDefinitions).orderBy(featureDefinitions.key) : []; }
+export async function listRestaurantFeatures(restaurantId: number) { const db = await getDb(); return db ? db.select().from(restaurantFeatures).where(eq(restaurantFeatures.restaurantId, restaurantId)) : []; }
+
+export const RESTAURANT_FEATURE_KEYS = ["overview", "files", "branches", "orders", "pos", "kds", "menu", "tables", "inventory", "team", "marketing", "reservations", "remote", "security", "health", "custom_domain", "integrations", "delivery", "loyalty", "reviews", "vcard", "analytics", "webhooks"] as const;
+const PLAN_FEATURES: Record<string, ReadonlySet<string>> = {
+  Starter: new Set(["overview", "menu", "orders"]),
+  Growth: new Set(["overview", "files", "branches", "orders", "pos", "menu", "tables", "team", "security"]),
+  "All Features": new Set(RESTAURANT_FEATURE_KEYS),
+  Enterprise: new Set(RESTAURANT_FEATURE_KEYS),
+};
+
+type FeatureAccessReason = "enabled" | "disabled" | "missing" | "dependency_disabled" | "database_unavailable";
+type FeatureAccess = { key: string; enabled: boolean; limit: number | null; reason: FeatureAccessReason };
+type FeatureDefinitionRow = typeof featureDefinitions.$inferSelect;
+type RestaurantFeatureRow = typeof restaurantFeatures.$inferSelect;
+type PlanFeatureRow = { key: string; enabled: boolean; featureLimit: number | null };
+type FeatureAccessContext = {
+  definitions: FeatureDefinitionRow[];
+  byKey: Map<string, FeatureDefinitionRow>;
+  byFeatureId: Map<number, RestaurantFeatureRow>;
+  planFeatureByKey: Map<string, PlanFeatureRow>;
+  configuredPlan: boolean;
+  planFeatures: ReadonlySet<string>;
+};
+
+async function loadFeatureAccessContext(restaurantId: number): Promise<FeatureAccessContext | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const definitions = await db.select().from(featureDefinitions);
+  const overrides = await db.select().from(restaurantFeatures).where(eq(restaurantFeatures.restaurantId, restaurantId));
+  const restaurant = (await db.select({ plan: restaurants.plan }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1))[0];
+  const subscription = (await db.select({ plan: subscriptions.plan }).from(subscriptions).where(and(eq(subscriptions.restaurantId, restaurantId), eq(subscriptions.status, "active"))).orderBy(desc(subscriptions.id)).limit(1))[0];
+  const activePlan = subscription?.plan ?? restaurant?.plan ?? "Starter";
+  const configuredPlanRows = await db.select({ key: featureDefinitions.key, enabled: packagePlanFeatures.enabled, featureLimit: packagePlanFeatures.featureLimit }).from(packagePlanFeatures).innerJoin(packagePlans, eq(packagePlanFeatures.planId, packagePlans.id)).innerJoin(featureDefinitions, eq(packagePlanFeatures.featureId, featureDefinitions.id)).where(and(or(eq(packagePlans.key, activePlan), eq(packagePlans.name, activePlan)), eq(packagePlans.isActive, true)));
+  return {
+    definitions,
+    byKey: new Map(definitions.map((definition) => [definition.key, definition])),
+    byFeatureId: new Map(overrides.map((override) => [override.featureId, override])),
+    planFeatureByKey: new Map(configuredPlanRows.map((row) => [row.key, row])),
+    configuredPlan: configuredPlanRows.length > 0,
+    planFeatures: PLAN_FEATURES[activePlan] ?? PLAN_FEATURES.Starter,
+  };
+}
+
+function evaluateFeatureAccess(context: FeatureAccessContext, key: string, visited = new Set<string>()): Omit<FeatureAccess, "key"> {
+  if (visited.has(key)) return { enabled: false, limit: null, reason: "dependency_disabled" };
+  const definition = context.byKey.get(key);
+  if (!definition) return { enabled: false, limit: null, reason: "missing" };
+  const override = context.byFeatureId.get(definition.id);
+  if (definition.dependencyKey) {
+    const dependency = evaluateFeatureAccess(context, definition.dependencyKey, new Set(Array.from(visited).concat(key)));
+    if (!dependency.enabled) return { enabled: false, limit: null, reason: "dependency_disabled" };
+  }
+  if (override?.enabled === false) return { enabled: false, limit: override.overrideLimit ?? context.planFeatureByKey.get(key)?.featureLimit ?? definition.defaultLimit ?? null, reason: "disabled" };
+  const packageFeature = context.planFeatureByKey.get(key);
+  if (!override && ((context.configuredPlan && packageFeature?.enabled !== true) || (!context.configuredPlan && !context.planFeatures.has(key)))) return { enabled: false, limit: packageFeature?.featureLimit ?? definition.defaultLimit ?? null, reason: "disabled" };
+  return { enabled: true, limit: override?.overrideLimit ?? packageFeature?.featureLimit ?? definition.defaultLimit ?? null, reason: "enabled" };
+}
+
+export async function getFeatureAccess(restaurantId: number, featureKey: string): Promise<FeatureAccess> {
+  const context = await loadFeatureAccessContext(restaurantId);
+  if (!context) return { key: featureKey, enabled: false, limit: null, reason: "database_unavailable" };
+  return { key: featureKey, ...evaluateFeatureAccess(context, featureKey) };
+}
+
+export async function getFeatureAccessMap(restaurantId: number): Promise<Map<string, FeatureAccess>> {
+  const context = await loadFeatureAccessContext(restaurantId);
+  if (!context) return new Map();
+  return new Map(context.definitions.map((definition) => [definition.key, { key: definition.key, ...evaluateFeatureAccess(context, definition.key) }]));
+}
+
+export async function getUserSecurity(userId: number) { const db = await getDb(); if (!db) return undefined; const rows = await db.select().from(userSecurity).where(eq(userSecurity.userId, userId)).limit(1); return rows[0]; }
+export async function getReceiptTemplate(restaurantId: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(receiptTemplates).where(eq(receiptTemplates.restaurantId, restaurantId)).limit(1))[0]; }
+export async function upsertReceiptTemplate(input: { restaurantId: number; headerText: string; footerText: string; logoUrl?: string | null; messageTemplatesJson?: string | null; escPosReceiptTemplate?: string | null; escPosKitchenTemplate?: string | null; escPosInternalTemplate?: string | null; escPosExternalTemplate?: string | null; escPosDeliveryTemplate?: string | null; escPosReceiptLocalesJson?: string | null; escPosKitchenLocalesJson?: string | null; createdByUserId?: number | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = await getReceiptTemplate(input.restaurantId); if (existing) { await db.update(receiptTemplates).set({ headerText: input.headerText, footerText: input.footerText, logoUrl: input.logoUrl === undefined ? existing.logoUrl : input.logoUrl, messageTemplatesJson: input.messageTemplatesJson === undefined ? existing.messageTemplatesJson : input.messageTemplatesJson, escPosReceiptTemplate: input.escPosReceiptTemplate === undefined ? existing.escPosReceiptTemplate : input.escPosReceiptTemplate, escPosKitchenTemplate: input.escPosKitchenTemplate === undefined ? existing.escPosKitchenTemplate : input.escPosKitchenTemplate, escPosInternalTemplate: input.escPosInternalTemplate === undefined ? existing.escPosInternalTemplate : input.escPosInternalTemplate, escPosExternalTemplate: input.escPosExternalTemplate === undefined ? existing.escPosExternalTemplate : input.escPosExternalTemplate, escPosDeliveryTemplate: input.escPosDeliveryTemplate === undefined ? existing.escPosDeliveryTemplate : input.escPosDeliveryTemplate, escPosReceiptLocalesJson: input.escPosReceiptLocalesJson === undefined ? existing.escPosReceiptLocalesJson : input.escPosReceiptLocalesJson, escPosKitchenLocalesJson: input.escPosKitchenLocalesJson === undefined ? existing.escPosKitchenLocalesJson : input.escPosKitchenLocalesJson, updatedAt: new Date() }).where(eq(receiptTemplates.restaurantId, input.restaurantId)); return existing.id; } const result = await db.insert(receiptTemplates).values({ restaurantId: input.restaurantId, headerText: input.headerText, footerText: input.footerText, logoUrl: input.logoUrl ?? null, messageTemplatesJson: input.messageTemplatesJson ?? null, escPosReceiptTemplate: input.escPosReceiptTemplate ?? null, escPosKitchenTemplate: input.escPosKitchenTemplate ?? null, escPosInternalTemplate: input.escPosInternalTemplate ?? null, escPosExternalTemplate: input.escPosExternalTemplate ?? null, escPosDeliveryTemplate: input.escPosDeliveryTemplate ?? null, escPosReceiptLocalesJson: input.escPosReceiptLocalesJson ?? null, escPosKitchenLocalesJson: input.escPosKitchenLocalesJson ?? null, createdByUserId: input.createdByUserId ?? null }); return Number(result[0].insertId); }
+export async function insertAuditLog(input: typeof auditLogs.$inferInsert) { const db = await getDb(); if (!db) return undefined; let safeInput = input; if (input.actorUserId !== undefined && input.actorUserId !== null) { const actor = await db.select({ id: users.id }).from(users).where(eq(users.id, input.actorUserId)).limit(1); if (!actor[0]) safeInput = { ...input, actorUserId: null }; } const result = await db.insert(auditLogs).values(safeInput); return Number(result[0].insertId); }
+export type AuditSeverity = "critical" | "warning" | "info";
+export function getAuditSeverity(input: { action?: string | null; outcome?: string | null; metadata?: string | null }): AuditSeverity {
+  const action = input.action ?? "";
+  let metadata: Record<string, unknown> = {};
+  try { metadata = input.metadata ? JSON.parse(input.metadata) as Record<string, unknown> : {}; } catch { metadata = {}; }
+  if (input.outcome === "failure" || input.outcome === "denied" || action.includes("delete") || action.includes("permissions") || action.includes("cancel") || metadata.toStatus === "cancelled") return "critical";
+  if (action.includes("status.updated") || action.includes("account.updated") || action.includes("pricing.updated") || action.includes("delivery.")) return "warning";
+  return "info";
+}
+export async function listAuditLogs(filters?: { restaurantId?: number; actorUserId?: number; actorRole?: string; actorName?: string; action?: string; actions?: string[]; severity?: AuditSeverity; from?: Date; to?: Date; limit?: number }) { const db = await getDb(); if (!db) return []; const limit = filters?.limit ?? 100; const conditions = [filters?.restaurantId ? eq(auditLogs.restaurantId, filters.restaurantId) : undefined, filters?.actorUserId ? eq(auditLogs.actorUserId, filters.actorUserId) : undefined, filters?.actorRole ? eq(auditLogs.actorRole, filters.actorRole) : undefined, filters?.actorName ? like(users.name, `%${filters.actorName}%`) : undefined, filters?.action ? eq(auditLogs.action, filters.action) : undefined, filters?.actions?.length ? inArray(auditLogs.action, filters.actions) : undefined, filters?.from ? gte(auditLogs.createdAt, filters.from) : undefined, filters?.to ? lte(auditLogs.createdAt, filters.to) : undefined].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition)); const whereClause = conditions.length > 0 ? and(...conditions) : undefined; const rows = await db.select({ id: auditLogs.id, restaurantId: auditLogs.restaurantId, branchId: auditLogs.branchId, actorUserId: auditLogs.actorUserId, actorRole: auditLogs.actorRole, actorName: users.name, action: auditLogs.action, entityType: auditLogs.entityType, entityId: auditLogs.entityId, outcome: auditLogs.outcome, requestId: auditLogs.requestId, metadata: auditLogs.metadata, createdAt: auditLogs.createdAt }).from(auditLogs).leftJoin(users, eq(auditLogs.actorUserId, users.id)).where(whereClause).orderBy(desc(auditLogs.createdAt)).limit(filters?.severity ? Math.min(limit * 5, 2000) : limit); const enriched = rows.map((row) => ({ ...row, severity: getAuditSeverity(row) })); return filters?.severity ? enriched.filter((row) => row.severity === filters.severity).slice(0, limit) : enriched; }
+export async function getActivitySummary(restaurantId?: number) {
+  const db = await getDb();
+  if (!db) return { scope: restaurantId ? "restaurant" as const : "platform" as const, totals: { orders: 0, completed: 0, sales: 0, active: 0, auditEvents: 0 }, days: [] as Array<{ date: string; orders: number; sales: number }>, recentEvents: [] };
+  const orderRows = restaurantId ? await db.select({ createdAt: orders.createdAt, status: orders.status, total: orders.total }).from(orders).where(eq(orders.restaurantId, restaurantId)) : await db.select({ createdAt: orders.createdAt, status: orders.status, total: orders.total }).from(orders);
+  const events = restaurantId ? await db.select().from(auditLogs).where(eq(auditLogs.restaurantId, restaurantId)).orderBy(desc(auditLogs.createdAt)).limit(100) : await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100);
+  const now = new Date(); const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(now); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - (6 - index)); return { key: date.toISOString().slice(0, 10), date: date.toLocaleDateString("ar-SA", { weekday: "short", month: "numeric", day: "numeric" }), orders: 0, sales: 0 }; });
+  const byDate = new Map(days.map((day) => [day.key, day]));
+  let sales = 0; let completed = 0;
+  for (const row of orderRows) { const amount = Number(row.total ?? 0); sales += amount; if (row.status === "completed") completed += 1; const key = new Date(row.createdAt).toISOString().slice(0, 10); const day = byDate.get(key); if (day) { day.orders += 1; day.sales += amount; } }
+  return { scope: restaurantId ? "restaurant" as const : "platform" as const, totals: { orders: orderRows.length, completed, sales, active: orderRows.filter((row) => ["new", "preparing", "ready"].includes(row.status)).length, auditEvents: events.length }, days: days.map(({ key, ...day }) => day), recentEvents: events.slice(0, 12) };
+}
+export async function globalSearch(restaurantId: number, query: string, limit = 20) {
+  const db = await getDb();
+  if (!db) return { results: [], available: false as const };
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return { results: [], available: true as const };
+  const [menu, orderRows, staff, branchRows, tasks] = await Promise.all([
+    db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId)),
+    db.select().from(orders).where(eq(orders.restaurantId, restaurantId)).orderBy(desc(orders.createdAt)).limit(100),
+    db.select().from(employees).where(eq(employees.restaurantId, restaurantId)),
+    db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+    db.select().from(remoteTasks).where(eq(remoteTasks.restaurantId, restaurantId)).orderBy(desc(remoteTasks.createdAt)).limit(100),
+  ]);
+  const results = [
+    ...menu.filter((item) => `${item.name} ${item.description ?? ""}`.toLowerCase().includes(normalized)).map((item) => ({ type: "menu" as const, id: item.id, title: item.name, subtitle: `${item.price} ر.س`, action: "menu" })),
+    ...orderRows.filter((item) => `${item.id} ${item.tableName ?? ""} ${item.status}`.toLowerCase().includes(normalized)).map((item) => ({ type: "order" as const, id: item.id, title: `طلب #${item.id}`, subtitle: `${item.status} · ${item.total} ر.س`, action: "orders" })),
+    ...staff.filter((item) => `${item.name} ${item.role}`.toLowerCase().includes(normalized)).map((item) => ({ type: "employee" as const, id: item.id, title: item.name, subtitle: item.role, action: "employees" })),
+    ...branchRows.filter((item) => `${item.name} ${item.city}`.toLowerCase().includes(normalized)).map((item) => ({ type: "branch" as const, id: item.id, title: item.name, subtitle: item.city, action: "branches" })),
+    ...tasks.filter((item) => `${item.title} ${item.description ?? ""}`.toLowerCase().includes(normalized)).map((item) => ({ type: "task" as const, id: item.id, title: item.title, subtitle: item.status, action: "remote" })),
+  ];
+  return { results: results.slice(0, limit), available: true as const };
+}
+export function parseRevenueMinorUnits(value: unknown, decimals = 2) {
+  const safeDecimals = Math.max(0, Math.min(3, Math.trunc(decimals)));
+  const numeric = Number(String(value ?? "0").replace(/,/g, "").trim());
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 10 ** safeDecimals);
+}
+
+export function isRecognizedRevenueOrder(order: { status?: string | null; paymentStatus?: string | null }) {
+  return order.status === "completed" && order.paymentStatus === "paid";
+}
+
+export function calculateRecognizedRevenue(orders: Array<{ total?: unknown; currencyDecimals?: number | null; status?: string | null; paymentStatus?: string | null }>) {
+  return orders.filter(isRecognizedRevenueOrder).reduce((sum, order) => {
+    const decimals = Number.isInteger(order.currencyDecimals) ? Number(order.currencyDecimals) : 2;
+    return sum + parseRevenueMinorUnits(order.total, decimals) / 10 ** Math.max(0, Math.min(3, decimals));
+  }, 0);
+}
+
+export async function getRoleSummary(restaurantId: number, role?: string, userId?: number, branchId?: number) {
+  const unavailable = { available: false as const, sales: 0, orders: 0, average: 0, avgFulfillmentMinutes: 0, deliveryOrders: 0, customerOrders: 0, newOrders: 0, preparing: 0, ready: 0, completed: 0, tables: 0, scope: "unavailable" as const };
+  const db = await getDb();
+  if (!db) return unavailable;
+  const scope = role === "customer" ? "customer" : role === "driver" ? "driver" : "restaurant";
+  const baseFilters = [eq(orders.restaurantId, restaurantId), ...(branchId ? [eq(orders.branchId, branchId)] : [])];
+  const roleFilters = role === "customer" && userId ? [...baseFilters, eq(orders.customerId, userId)] : role === "driver" && userId ? [...baseFilters, eq(orders.driverId, userId)] : baseFilters;
+  const rows = await db.select().from(orders).where(and(...roleFilters));
+  const revenueRows = rows.filter(isRecognizedRevenueOrder);
+  const total = calculateRecognizedRevenue(rows);
+  const completedRows = rows.filter((order) => isRecognizedRevenueOrder(order) && order.createdAt && order.updatedAt);
+  const avgFulfillmentMinutes = completedRows.length ? completedRows.reduce((sum, order) => sum + Math.max(0, new Date(order.updatedAt).getTime() - new Date(order.createdAt).getTime()) / 60000, 0) / completedRows.length : 0;
+  const tableRows = branchId ? await db.select({ status: restaurantTables.status }).from(restaurantTables).where(eq(restaurantTables.branchId, branchId)) : [];
+  const tables = tableRows.filter((table) => table.status === "occupied").length;
+  const deliveryOrders = rows.filter((order) => order.channel === "delivery").length;
+  const customerOrders = role === "customer" ? rows.length : rows.filter((order) => order.customerId != null).length;
+  return { available: true as const, sales: total, orders: rows.length, average: revenueRows.length ? total / revenueRows.length : 0, avgFulfillmentMinutes, deliveryOrders, customerOrders, newOrders: rows.filter((order) => order.status === "new").length, preparing: rows.filter((order) => order.status === "preparing").length, ready: rows.filter((order) => order.status === "ready").length, completed: rows.filter((order) => order.status === "completed").length, tables, scope };
+}
+
+export type MediaScope = "platform" | "restaurant" | "user";
+export async function listTranslationErrors(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select().from(translationErrorLogs).where(eq(translationErrorLogs.restaurantId, restaurantId)).orderBy(desc(translationErrorLogs.createdAt)); }
+export async function createTranslationError(input: { restaurantId: number; entityType: "category" | "item" | "addon"; entityId: number; sourceLanguage: string; targetLanguage: string; sourceName: string; errorMessage: string; createdByUserId?: number | null; attempts?: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(translationErrorLogs).values({ ...input, createdByUserId: input.createdByUserId ?? null, attempts: input.attempts ?? 1 }); return Number(result[0].insertId); }
+export async function resolveTranslationError(id: number, restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(translationErrorLogs).set({ status: "resolved", resolvedAt: new Date() }).where(and(eq(translationErrorLogs.id, id), eq(translationErrorLogs.restaurantId, restaurantId))); return { success: true, id }; }
+
+export async function listMediaFiles(input: { scope: MediaScope; userId?: number; restaurantId?: number; search?: string; category?: "image" | "menu" | "logo" | "document" | "other" }) {
+  const db = await getDb(); if (!db) return [];
+  const predicates = [eq(mediaFiles.scope, input.scope), eq(mediaFiles.isDeleted, false)];
+  if (input.scope === "user") predicates.push(eq(mediaFiles.ownerUserId, input.userId ?? 0));
+  if (input.scope === "restaurant") predicates.push(eq(mediaFiles.restaurantId, input.restaurantId ?? 0));
+  if (input.category) predicates.push(eq(mediaFiles.category, input.category));
+  const rows = await db.select().from(mediaFiles).where(and(...predicates)).orderBy(desc(mediaFiles.createdAt));
+  const query = input.search?.trim().toLowerCase();
+  return query ? rows.filter((row) => row.originalName.toLowerCase().includes(query)) : rows;
+}
+export async function listMediaFolders(input: { scope: MediaScope; userId?: number; restaurantId?: number }) {
+  const db = await getDb(); if (!db) return [];
+  const predicates = [eq(mediaFolders.scope, input.scope)];
+  if (input.scope === "user") predicates.push(eq(mediaFolders.ownerUserId, input.userId ?? 0));
+  if (input.scope === "restaurant") predicates.push(eq(mediaFolders.restaurantId, input.restaurantId ?? 0));
+  return db.select().from(mediaFolders).where(and(...predicates)).orderBy(desc(mediaFolders.createdAt));
+}
+export async function getMediaUsage(input: { scope: MediaScope; userId?: number; restaurantId?: number }) {
+  const files = await listMediaFiles(input); return { usedBytes: files.reduce((total, file) => total + file.sizeBytes, 0), fileCount: files.length };
+}
+export async function createMediaFolder(input: { scope: MediaScope; ownerUserId?: number; restaurantId?: number; name: string; createdByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const result = await db.insert(mediaFolders).values({ scope: input.scope, ownerUserId: input.ownerUserId ?? null, restaurantId: input.restaurantId ?? null, name: input.name, createdByUserId: input.createdByUserId }); return Number(result[0].insertId);
+}
+export async function getValidMediaActorUserId(preferredUserId: number, restaurantId?: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const direct = (await db.select({ id: users.id }).from(users).where(eq(users.id, preferredUserId)).limit(1))[0]?.id; if (direct) return direct; if (restaurantId) { const member = (await db.select({ userId: restaurantMembers.userId }).from(restaurantMembers).where(eq(restaurantMembers.restaurantId, restaurantId)).limit(1))[0]?.userId; if (member) return member; } const fallback = (await db.select({ id: users.id }).from(users).limit(1))[0]?.id; if (!fallback) throw new Error("لا يوجد مستخدم صالح لحفظ ملف الوسائط"); return fallback; }
+export async function getOrCreateRestaurantArchiveFolder(restaurantId: number, createdByUserId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const existing = await db.select({ id: mediaFolders.id }).from(mediaFolders).where(and(eq(mediaFolders.scope, "restaurant"), eq(mediaFolders.restaurantId, restaurantId), eq(mediaFolders.name, "Menu Archive"))).limit(1); if (existing[0]) return existing[0].id; const validActor = await getValidMediaActorUserId(createdByUserId, restaurantId); const result = await db.insert(mediaFolders).values({ scope: "restaurant", restaurantId, ownerUserId: null, name: "Menu Archive", createdByUserId: validActor }); return Number(result[0].insertId); }
+export async function createMediaFile(input: { scope: MediaScope; ownerUserId?: number; restaurantId?: number; folderId?: number; originalName: string; storageKey: string; publicUrl: string; contentType: string; sizeBytes: number; category: "image" | "menu" | "logo" | "document" | "other"; uploadedByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const uploadedByUserId = await getValidMediaActorUserId(input.uploadedByUserId, input.restaurantId);
+  const result = await db.insert(mediaFiles).values({ ...input, uploadedByUserId, ownerUserId: input.ownerUserId ?? null, restaurantId: input.restaurantId ?? null, folderId: input.folderId ?? null }); return Number(result[0].insertId);
+}
+export async function bulkDeleteMediaFiles(input: { ids: number[]; scope: MediaScope; userId?: number; restaurantId?: number }) { const db = await getDb(); if (!db || input.ids.length === 0) return 0; const predicates = [inArray(mediaFiles.id, input.ids), eq(mediaFiles.scope, input.scope), eq(mediaFiles.isDeleted, false)]; if (input.scope === "user") predicates.push(eq(mediaFiles.ownerUserId, input.userId ?? 0)); if (input.scope === "restaurant") predicates.push(eq(mediaFiles.restaurantId, input.restaurantId ?? 0)); const result = await db.update(mediaFiles).set({ isDeleted: true }).where(and(...predicates)); return Number(result[0].affectedRows ?? 0); }
+export async function bulkMoveMediaFiles(input: { ids: number[]; folderId: number; scope: MediaScope; userId?: number; restaurantId?: number }) { const db = await getDb(); if (!db || input.ids.length === 0) return 0; const folderPredicates = [eq(mediaFolders.id, input.folderId), eq(mediaFolders.scope, input.scope)]; if (input.scope === "user") folderPredicates.push(eq(mediaFolders.ownerUserId, input.userId ?? 0)); if (input.scope === "restaurant") folderPredicates.push(eq(mediaFolders.restaurantId, input.restaurantId ?? 0)); const folder = (await db.select({ id: mediaFolders.id }).from(mediaFolders).where(and(...folderPredicates)).limit(1))[0]; if (!folder) throw new Error("المجلد غير موجود ضمن مساحة العمل الحالية"); const predicates = [inArray(mediaFiles.id, input.ids), eq(mediaFiles.scope, input.scope), eq(mediaFiles.isDeleted, false)]; if (input.scope === "user") predicates.push(eq(mediaFiles.ownerUserId, input.userId ?? 0)); if (input.scope === "restaurant") predicates.push(eq(mediaFiles.restaurantId, input.restaurantId ?? 0)); const result = await db.update(mediaFiles).set({ folderId: input.folderId }).where(and(...predicates)); return Number(result[0].affectedRows ?? 0); }
+
+export async function listRestaurantDisplayScreens(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select().from(restaurantDisplayScreens).where(eq(restaurantDisplayScreens.restaurantId, restaurantId)).orderBy(desc(restaurantDisplayScreens.updatedAt)); }
+export async function listRestaurantDisplaySlides(screenId: number, restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ slide: restaurantDisplaySlides, menuItem: menuItems, mediaFile: mediaFiles }).from(restaurantDisplaySlides).leftJoin(menuItems, eq(restaurantDisplaySlides.menuItemId, menuItems.id)).leftJoin(mediaFiles, eq(restaurantDisplaySlides.mediaFileId, mediaFiles.id)).where(and(eq(restaurantDisplaySlides.screenId, screenId), eq(restaurantDisplaySlides.restaurantId, restaurantId))).orderBy(restaurantDisplaySlides.sortOrder); }
+export async function listCampaignContents(campaignId: number, restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select({ content: campaignContents, menuItem: menuItems, mediaFile: mediaFiles }).from(campaignContents).leftJoin(menuItems, eq(campaignContents.menuItemId, menuItems.id)).leftJoin(mediaFiles, eq(campaignContents.mediaFileId, mediaFiles.id)).where(and(eq(campaignContents.campaignId, campaignId), eq(campaignContents.restaurantId, restaurantId))).orderBy(campaignContents.sortOrder); }
+
+const UI_TRANSLATION_SEEDS = [
+  ["admin.customer_center.title", "قائمة العملاء والحقوق", "Customer center", "Customer & rights list", "Liste des clients et des droits"],
+  ["admin.customer_center.description", "إدارة آمنة للحسابات والمحتوى والمبيعات والمحفظة من نفس نظرة المنصة.", "Customer center", "Securely manage accounts, content, sales, and wallet from the same platform view.", "Gérez de manière sécurisée les comptes, le contenu, les ventes et le portefeuille depuis la même vue de la plateforme."],
+  ["admin.customer_center.add", "إضافة عميل", "Customer center", "Add customer", "Ajouter un client"],
+  ["admin.customer_center.orders", "طلبات العملاء", "Customer center", "Customer orders", "Commandes des clients"],
+  ["admin.customer_center.content_review", "مراجعة محتوى العملاء", "Customer center", "Review customer content", "Examiner le contenu des clients"],
+  ["admin.customer_center.library", "مكتبة المشتريات", "Customer center", "Purchase library", "Bibliothèque d'achats"],
+  ["marketplace.title", "سوق المحتوى والوصفات", "Customer portal", "Content and recipes marketplace", "Marché des contenus et recettes"],
+  ["marketplace.description", "هذا سوق مستقل عن منيو المطاعم. اكتشف صور الأكل والوصفات المعروضة للمطاعم والحسابات المؤهلة، وراجع مشترياتك الرقمية من مكتبتك.", "Trend Kitchen", "This is a marketplace independent of restaurant menus. Discover food photos and recipes offered to restaurants and eligible accounts, and review your digital purchases from your library.", "Ce marché est indépendant des menus des restaurants. Découvrez les photos de plats et recettes proposées aux restaurants et aux comptes éligibles, et consultez vos achats numériques depuis votre bibliothèque."],
+  ["studio.upload", "رفع صورة جديدة", "Creator Studio", "Upload new image", "Téléverser une nouvelle image"],
+  ["studio.review_pending", "قيد المراجعة", "Creator Studio", "Under review", "En cours d'examen"],
+] as const;
+
+async function ensureUiTranslationSeeds(db: Awaited<ReturnType<typeof getDb>>) {
+  if (!db) return;
+  const chosen: { translationKey: string; sourceText: string; sourceLanguage: "ar"; targetLanguage: "ar" | "en" | "fr"; translatedText: string; context: string; status: "untranslated" | "draft" | "published" | "ignored" }[] = [];
+  for (const [translationKey, sourceText, context, enText, frText] of UI_TRANSLATION_SEEDS) {
+    for (const targetLanguage of ["en", "fr"] as const) {
+      chosen.push({ translationKey, sourceText, sourceLanguage: "ar", targetLanguage, translatedText: targetLanguage === "en" ? enText : frText, context, status: "published" });
+    }
+  }
+  const existing = await db.select({ id: uiTranslationEntries.id, translationKey: uiTranslationEntries.translationKey, targetLanguage: uiTranslationEntries.targetLanguage, status: uiTranslationEntries.status, translatedText: uiTranslationEntries.translatedText }).from(uiTranslationEntries).where(inArray(uiTranslationEntries.translationKey, chosen.map((entry) => entry.translationKey)));
+  const existingByKey = new Map(existing.map((entry) => [`${entry.translationKey}:${entry.targetLanguage}`, entry]));
+  const toInsert = chosen.filter((entry) => !existingByKey.has(`${entry.translationKey}:${entry.targetLanguage}`));
+  for (const entry of chosen) {
+    const row = existingByKey.get(`${entry.translationKey}:${entry.targetLanguage}`);
+    if (row && row.status === "untranslated" && !row.translatedText?.trim()) {
+      await db.update(uiTranslationEntries).set({ translatedText: entry.translatedText, status: "published", lastSeenAt: new Date() }).where(eq(uiTranslationEntries.id, row.id));
+    }
+  }
+  if (toInsert.length) await db.insert(uiTranslationEntries).values(toInsert);
+}
+
+export async function listPublishedUiTranslations(targetLanguage?: string) {
+  const db = await getDb(); if (!db) return [];
+  const conditions = [eq(uiTranslationEntries.status, "published" as const), ...(targetLanguage ? [eq(uiTranslationEntries.targetLanguage, targetLanguage)] : [])];
+  return db.select({ translationKey: uiTranslationEntries.translationKey, sourceText: uiTranslationEntries.sourceText, targetLanguage: uiTranslationEntries.targetLanguage, translatedText: uiTranslationEntries.translatedText }).from(uiTranslationEntries).where(and(...conditions)).orderBy(uiTranslationEntries.translationKey);
+}
+
+export async function listUiTranslationEntries(filters?: { targetLanguage?: string; status?: "untranslated" | "draft" | "published" | "ignored"; query?: string }) {
+  const db = await getDb(); if (!db) return [];
+  await ensureUiTranslationSeeds(db);
+  const conditions = [];
+  if (filters?.targetLanguage) conditions.push(eq(uiTranslationEntries.targetLanguage, filters.targetLanguage));
+  if (filters?.status) conditions.push(eq(uiTranslationEntries.status, filters.status));
+  if (filters?.query?.trim()) { const query = `%${filters.query.trim()}%`; conditions.push(sql`(${uiTranslationEntries.translationKey} like ${query} or ${uiTranslationEntries.sourceText} like ${query} or coalesce(${uiTranslationEntries.translatedText}, '') like ${query})`); }
+  return db.select().from(uiTranslationEntries).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(uiTranslationEntries.lastSeenAt), desc(uiTranslationEntries.updatedAt));
+}
+export async function upsertUiTranslationEntry(input: { id?: number; translationKey: string; sourceText: string; sourceLanguage?: string; targetLanguage: string; translatedText?: string | null; context?: string | null; status?: "untranslated" | "draft" | "published" | "ignored"; userId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const translationKey = input.translationKey.trim(); const sourceText = input.sourceText.trim(); const targetLanguage = input.targetLanguage.trim();
+  if (!translationKey || !sourceText || !targetLanguage) throw new Error("مفتاح النص والنص المصدر واللغة الهدف مطلوبة");
+  const translatedText = input.translatedText?.trim() || null;
+  const status = input.status ?? (translatedText ? "draft" : "untranslated");
+  if (input.id) {
+    const existing = (await db.select().from(uiTranslationEntries).where(eq(uiTranslationEntries.id, input.id)).limit(1))[0];
+    if (!existing) throw new Error("سجل الترجمة غير موجود");
+    await db.update(uiTranslationEntries).set({ translationKey, sourceText, sourceLanguage: input.sourceLanguage ?? "ar", targetLanguage, translatedText, context: input.context?.trim() || null, status, updatedByUserId: input.userId, lastSeenAt: new Date() }).where(eq(uiTranslationEntries.id, input.id));
+    await db.insert(uiTranslationHistory).values({ entryId: input.id, translationKey, sourceTextBefore: existing.sourceText, sourceTextAfter: sourceText, translatedTextBefore: existing.translatedText, translatedTextAfter: translatedText, statusBefore: existing.status, statusAfter: status, action: status === "published" && existing.status !== "published" ? "bulk_publish" : "manual_edit", changedByUserId: input.userId });
+    return input.id;
+  }
+  const existing = (await db.select({ id: uiTranslationEntries.id }).from(uiTranslationEntries).where(and(eq(uiTranslationEntries.translationKey, translationKey), eq(uiTranslationEntries.targetLanguage, targetLanguage))).limit(1))[0];
+  if (existing) { await db.update(uiTranslationEntries).set({ sourceText, translatedText, context: input.context?.trim() || null, status, updatedByUserId: input.userId, occurrenceCount: sql`${uiTranslationEntries.occurrenceCount} + 1`, lastSeenAt: new Date() }).where(eq(uiTranslationEntries.id, existing.id)); return existing.id; }
+  const result = await db.insert(uiTranslationEntries).values({ translationKey, sourceText, sourceLanguage: input.sourceLanguage ?? "ar", targetLanguage, translatedText, context: input.context?.trim() || null, status, createdByUserId: input.userId, updatedByUserId: input.userId });
+  return Number(result[0].insertId);
+}
+
+export async function listUiTranslationHistory(entryId?: number) { const db = await getDb(); if (!db) return []; return db.select().from(uiTranslationHistory).where(entryId ? eq(uiTranslationHistory.entryId, entryId) : undefined).orderBy(desc(uiTranslationHistory.createdAt)).limit(500); }
+export async function publishUiTranslationEntries(ids: number[], userId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const safeIds = Array.from(new Set(ids)).slice(0, 200); const rows = safeIds.length ? await db.select().from(uiTranslationEntries).where(inArray(uiTranslationEntries.id, safeIds)) : []; let published = 0; for (const row of rows) { if (row.status === "published" || !row.translatedText?.trim()) continue; await db.update(uiTranslationEntries).set({ status: "published", updatedByUserId: userId, updatedAt: new Date() }).where(eq(uiTranslationEntries.id, row.id)); await db.insert(uiTranslationHistory).values({ entryId: row.id, translationKey: row.translationKey, sourceTextBefore: row.sourceText, sourceTextAfter: row.sourceText, translatedTextBefore: row.translatedText, translatedTextAfter: row.translatedText, statusBefore: row.status, statusAfter: "published", action: "bulk_publish", changedByUserId: userId }); published += 1; } return published; }
+export async function listTranslationGlossary(restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select().from(translationGlossaryEntries).where(eq(translationGlossaryEntries.restaurantId, restaurantId)).orderBy(desc(translationGlossaryEntries.updatedAt)); }
+export async function upsertTranslationGlossary(input: { id?: number; restaurantId: number; sourceLanguage: string; targetLanguage: string; sourceTerm: string; translatedTerm: string; termType: "brand" | "dish" | "ingredient" | "modifier" | "other"; isProtected: boolean; createdByUserId: number | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const sourceTerm = input.sourceTerm.trim(); const translatedTerm = input.translatedTerm.trim(); if (!sourceTerm || !translatedTerm) throw new Error("مصطلح المصدر والترجمة مطلوبان"); if (input.id) { const existing = await db.select({ id: translationGlossaryEntries.id, restaurantId: translationGlossaryEntries.restaurantId }).from(translationGlossaryEntries).where(eq(translationGlossaryEntries.id, input.id)).limit(1); if (!existing[0] || existing[0].restaurantId !== input.restaurantId) throw new Error("مصطلح القاموس غير مرتبط بالمطعم"); await db.update(translationGlossaryEntries).set({ sourceLanguage: input.sourceLanguage, targetLanguage: input.targetLanguage, sourceTerm, translatedTerm, termType: input.termType, isProtected: input.isProtected }).where(and(eq(translationGlossaryEntries.id, input.id), eq(translationGlossaryEntries.restaurantId, input.restaurantId))); return input.id; } const result = await db.insert(translationGlossaryEntries).values({ restaurantId: input.restaurantId, sourceLanguage: input.sourceLanguage, targetLanguage: input.targetLanguage, sourceTerm, translatedTerm, termType: input.termType, isProtected: input.isProtected, createdByUserId: input.createdByUserId }); return Number(result[0].insertId); }
+export async function deleteTranslationGlossary(id: number, restaurantId: number) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.delete(translationGlossaryEntries).where(and(eq(translationGlossaryEntries.id, id), eq(translationGlossaryEntries.restaurantId, restaurantId))); return id; }
+export async function createTranslationJob(input: { restaurantId: number; targetLanguage: string; totalItems: number; createdByUserId: number | null }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(translationJobs).values({ restaurantId: input.restaurantId, targetLanguage: input.targetLanguage, totalItems: input.totalItems, createdByUserId: input.createdByUserId, status: "queued" }); return Number(result[0].insertId); }
+export async function getTranslationJob(id: number, restaurantId: number) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(translationJobs).where(and(eq(translationJobs.id, id), eq(translationJobs.restaurantId, restaurantId))).limit(1))[0]; }
+export async function updateTranslationJob(id: number, restaurantId: number, changes: Partial<{ status: "queued" | "running" | "completed" | "failed" | "cancelled"; processedItems: number; successItems: number; errorItems: number; currentLabel: string | null; lastError: string | null; startedAt: Date | null; completedAt: Date | null }>) { const db = await getDb(); if (!db) throw new Error("Database is not available"); await db.update(translationJobs).set(changes).where(and(eq(translationJobs.id, id), eq(translationJobs.restaurantId, restaurantId))); return id; }
+export async function addTranslationJobError(input: { jobId: number; restaurantId: number; entityType: "category" | "item" | "addon"; entityId: number; targetLanguage: string; sourceName: string; errorMessage: string; attempts?: number }) { const db = await getDb(); if (!db) throw new Error("Database is not available"); const result = await db.insert(translationJobErrors).values({ ...input, attempts: input.attempts ?? 1 }); return Number(result[0].insertId); }
+export async function listTranslationJobErrors(jobId: number, restaurantId: number) { const db = await getDb(); if (!db) return []; return db.select().from(translationJobErrors).where(and(eq(translationJobErrors.jobId, jobId), eq(translationJobErrors.restaurantId, restaurantId))).orderBy(desc(translationJobErrors.createdAt)); }
+
+
+export async function listFinancialLedgerEntries(input: { restaurantId?: number; branchId?: number; userId?: number; section?: string; entryType?: "payment" | "refund" | "cancellation" | "deposit" | "withdrawal" | "adjustment"; from?: Date; to?: Date; limit?: number }) {
+  const db = await getDb(); if (!db) return [];
+  const conditions = [input.restaurantId ? eq(financialLedgerEntries.restaurantId, input.restaurantId) : undefined, input.branchId ? eq(financialLedgerEntries.branchId, input.branchId) : undefined, input.userId ? eq(financialLedgerEntries.userId, input.userId) : undefined, input.section ? eq(financialLedgerEntries.section, input.section) : undefined, input.entryType ? eq(financialLedgerEntries.entryType, input.entryType) : undefined, input.from ? gte(financialLedgerEntries.createdAt, input.from) : undefined, input.to ? lte(financialLedgerEntries.createdAt, input.to) : undefined].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
+  return db.select().from(financialLedgerEntries).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(financialLedgerEntries.createdAt)).limit(Math.min(Math.max(input.limit ?? 200, 1), 1000));
+}
+
+export async function createFinancialLedgerEntry(input: { restaurantId?: number | null; branchId?: number | null; userId?: number | null; createdByUserId?: number | null; section: string; entryType: "payment" | "refund" | "cancellation" | "deposit" | "withdrawal" | "adjustment"; direction: "credit" | "debit"; amount: string; currencyCode?: string; referenceType?: string | null; referenceId?: number | null; idempotencyKey?: string | null; note?: string | null }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const normalizedAmount = Number(input.amount).toFixed(2); if (!Number.isFinite(Number(input.amount)) || Number(input.amount) <= 0) throw new Error("Ledger amount must be positive");
+  if (input.idempotencyKey) { const existing = await db.select({ id: financialLedgerEntries.id }).from(financialLedgerEntries).where(eq(financialLedgerEntries.idempotencyKey, input.idempotencyKey)).limit(1); if (existing[0]) return existing[0].id; }
+  const result = await db.insert(financialLedgerEntries).values({ restaurantId: input.restaurantId ?? null, branchId: input.branchId ?? null, userId: input.userId ?? null, createdByUserId: input.createdByUserId ?? null, section: input.section.trim().slice(0, 80), entryType: input.entryType, direction: input.direction, amount: normalizedAmount, currencyCode: input.currencyCode ?? "SAR", status: "posted", referenceType: input.referenceType ?? null, referenceId: input.referenceId ?? null, idempotencyKey: input.idempotencyKey ?? null, note: input.note?.trim().slice(0, 500) ?? null });
+  return Number(result[0].insertId);
+}
+
+export async function getOrCreateDriverSecurityDeposit(input: { restaurantId: number; driverUserId: number; createdByUserId: number; openingBalance?: string; currencyCode?: string; note?: string | null }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const existing = await db.select().from(driverSecurityDeposits).where(and(eq(driverSecurityDeposits.restaurantId, input.restaurantId), eq(driverSecurityDeposits.driverUserId, input.driverUserId))).limit(1); if (existing[0]) return existing[0];
+  const opening = Number(input.openingBalance ?? "0"); if (!Number.isFinite(opening) || opening < 0) throw new Error("Opening deposit must be non-negative");
+  const result = await db.insert(driverSecurityDeposits).values({ restaurantId: input.restaurantId, driverUserId: input.driverUserId, currencyCode: input.currencyCode ?? "SAR", openingBalance: opening.toFixed(2), currentBalance: opening.toFixed(2), status: "active", note: input.note?.trim().slice(0, 500) ?? null, createdByUserId: input.createdByUserId });
+  return (await db.select().from(driverSecurityDeposits).where(eq(driverSecurityDeposits.id, Number(result[0].insertId))).limit(1))[0];
+}
+
+export async function recordDriverSecurityDepositTransaction(input: { restaurantId: number; driverUserId: number; createdByUserId: number; type: "deposit" | "withdrawal" | "hold" | "release" | "adjustment"; amount: string; referenceType?: string | null; referenceId?: number | null; note?: string | null }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const account = (await db.select().from(driverSecurityDeposits).where(and(
+    eq(driverSecurityDeposits.restaurantId, input.restaurantId),
+    eq(driverSecurityDeposits.driverUserId, input.driverUserId),
+    eq(driverSecurityDeposits.status, "active"),
+  )).limit(1))[0];
+  if (!account) throw new Error("Driver deposit account is not active");
+  const amount = Number(input.amount); if (!Number.isFinite(amount) || amount <= 0) throw new Error("Deposit transaction amount must be positive");
+  const increases = input.type === "deposit" || input.type === "release"; const nextBalance = Number(account.currentBalance) + (increases ? amount : -amount); if (nextBalance < 0) throw new Error("Driver deposit balance cannot be negative");
+  return db.transaction(async (tx) => { await tx.update(driverSecurityDeposits).set({ currentBalance: nextBalance.toFixed(2), updatedAt: new Date() }).where(eq(driverSecurityDeposits.id, account.id)); const result = await tx.insert(driverSecurityDepositTransactions).values({ depositAccountId: account.id, restaurantId: input.restaurantId, driverUserId: input.driverUserId, type: input.type, amount: amount.toFixed(2), balanceAfter: nextBalance.toFixed(2), referenceType: input.referenceType ?? null, referenceId: input.referenceId ?? null, note: input.note?.trim().slice(0, 500) ?? null, createdByUserId: input.createdByUserId }); return { id: Number(result[0].insertId), depositAccountId: account.id, balanceAfter: nextBalance.toFixed(2) }; });
+}
+
+export async function purchaseContentFromWallet(input: { listingId: number; buyerUserId: number; buyerType: "customer" | "merchant"; restaurantId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  return db.transaction(async (tx) => {
+    const row = (await tx.select({ listing: contentListings }).from(contentListings).where(and(eq(contentListings.id, input.listingId), eq(contentListings.status, "published"))).limit(1))[0];
+    if (!row) throw new Error("المحتوى غير متاح للشراء");
+    if (row.listing.ownerUserId === input.buyerUserId) throw new Error("لا يمكن شراء المحتوى من صاحبه");
+    const amount = Number(row.listing.price);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("سعر المحتوى غير صالح");
+    const existing = await tx.select({ id: contentPurchaseOrders.id, itemsJson: contentPurchaseOrders.itemsJson }).from(contentPurchaseOrders).where(and(eq(contentPurchaseOrders.buyerUserId, input.buyerUserId), eq(contentPurchaseOrders.status, "approved"))).limit(100);
+    if (existing.some((purchase) => { try { return (JSON.parse(purchase.itemsJson) as Array<{ listingId?: number }>).some((item) => item.listingId === input.listingId); } catch { return false; } })) throw new Error("تم شراء هذا المحتوى مسبقًا");
+    const now = new Date();
+    const invoiceNumber = `NFOOD-CONTENT-${Date.now()}-${nanoid(6).toUpperCase()}`;
+    let purchaseAccountId: number | null = null;
+    let buyerBalance = 0;
+    let buyerNext = 0;
+    let buyerWalletId: number | null = null;
+    if (input.buyerType === "merchant") {
+      if (!input.restaurantId) throw new Error("يجب ربط الحساب التجاري بمطعم قبل الشراء");
+      let purchaseAccount = (await tx.select().from(commerceFundingAccounts).where(and(eq(commerceFundingAccounts.ownerUserId, input.buyerUserId), eq(commerceFundingAccounts.restaurantId, input.restaurantId), eq(commerceFundingAccounts.accountType, "merchant_purchase"), eq(commerceFundingAccounts.status, "active"))).limit(1))[0];
+      if (!purchaseAccount) {
+        const created = await tx.insert(commerceFundingAccounts).values({ ownerUserId: input.buyerUserId, restaurantId: input.restaurantId, accountType: "merchant_purchase", currencyCode: row.listing.currencyCode, availableBalance: "0.00", createdByUserId: input.buyerUserId });
+        purchaseAccount = (await tx.select().from(commerceFundingAccounts).where(eq(commerceFundingAccounts.id, Number(created[0].insertId))).limit(1))[0];
+      }
+      if (!purchaseAccount) throw new Error("تعذر إنشاء حساب مشتريات مستقل");
+      purchaseAccountId = purchaseAccount.id;
+      buyerBalance = Number(purchaseAccount.availableBalance);
+      if (buyerBalance < amount) throw new Error("حساب مشتريات المحتوى غير ممول؛ لا يمكن استخدام رصيد المطعم التشغيلي");
+      buyerNext = buyerBalance - amount;
+    } else {
+      const buyer = (await tx.select().from(walletAccounts).where(eq(walletAccounts.customerId, input.buyerUserId)).limit(1))[0];
+      if (!buyer || Number(buyer.balance) < amount) throw new Error("رصيد محفظتك لا يكفي لإتمام الشراء");
+      buyerWalletId = buyer.id;
+      buyerBalance = Number(buyer.balance);
+      buyerNext = buyerBalance - amount;
+    }
+    const orderResult = await tx.insert(contentPurchaseOrders).values({ restaurantId: input.restaurantId ?? null, buyerUserId: input.buyerUserId, buyerType: input.buyerType, paymentSource: input.buyerType === "merchant" ? "purchase_account" : "wallet", purchaseAccountId, operatingFundsExcluded: true, invoiceNumber, customerUserId: input.buyerType === "customer" ? input.buyerUserId : null, itemsJson: JSON.stringify([{ listingId: row.listing.id, title: row.listing.title, price: String(row.listing.price), currencyCode: row.listing.currencyCode }]), total: amount.toFixed(2), currencyCode: row.listing.currencyCode, status: "approved", paymentStatus: "paid", paidAt: now, note: input.buyerType === "merchant" ? "شراء محتوى من حساب مشتريات مستقل" : "شراء محتوى Studio من محفظة العميل" });
+    const orderId = Number(orderResult[0].insertId);
+    if (input.buyerType === "merchant" && purchaseAccountId) {
+      const updated = await tx.update(commerceFundingAccounts).set({ availableBalance: buyerNext.toFixed(2), updatedAt: now }).where(and(eq(commerceFundingAccounts.id, purchaseAccountId), gte(commerceFundingAccounts.availableBalance, amount.toFixed(2))));
+      if ((updated as unknown as { affectedRows?: number }).affectedRows === 0) throw new Error("تعذر خصم حساب المشتريات المستقل؛ أعد المحاولة");
+      await tx.insert(financialLedgerEntries).values({ restaurantId: null, branchId: null, userId: input.buyerUserId, createdByUserId: input.buyerUserId, section: "content_purchase_account", entryType: "payment", direction: "debit", amount: amount.toFixed(2), currencyCode: row.listing.currencyCode, referenceType: "content_purchase", referenceId: orderId, fundingAccountId: purchaseAccountId, note: `فاتورة مستقلة ${invoiceNumber}` });
+    } else if (buyerWalletId) {
+      await tx.update(walletAccounts).set({ balance: buyerNext.toFixed(2), updatedAt: now }).where(and(eq(walletAccounts.id, buyerWalletId), gte(walletAccounts.balance, amount.toFixed(2))));
+    }
+    const owner = (await tx.select().from(walletAccounts).where(eq(walletAccounts.customerId, row.listing.ownerUserId)).limit(1))[0] ?? (() => null)();
+    let ownerAccount = owner;
+    if (!ownerAccount) { const created = await tx.insert(walletAccounts).values({ customerId: row.listing.ownerUserId, currencyCode: row.listing.currencyCode, balance: "0.00" }); ownerAccount = (await tx.select().from(walletAccounts).where(eq(walletAccounts.id, Number(created[0].insertId))).limit(1))[0]; }
+    if (!ownerAccount) throw new Error("تعذر إنشاء محفظة صانع المحتوى");
+    const reward = Number((amount * 0.8).toFixed(2));
+    const ownerNext = Number(ownerAccount.balance) + reward;
+    await tx.update(walletAccounts).set({ balance: ownerNext.toFixed(2), updatedAt: now }).where(eq(walletAccounts.id, ownerAccount.id));
+    if (buyerWalletId) await tx.insert(walletTransactions).values({ walletAccountId: buyerWalletId, customerId: input.buyerUserId, type: "debit", amount: amount.toFixed(2), balanceAfter: buyerNext.toFixed(2), referenceType: "content_purchase", referenceId: orderId, note: "شراء محتوى Studio من محفظة العميل", createdAt: now });
+    await tx.insert(walletTransactions).values({ walletAccountId: ownerAccount.id, customerId: row.listing.ownerUserId, type: "credit", amount: reward.toFixed(2), balanceAfter: ownerNext.toFixed(2), referenceType: "content_reward", referenceId: orderId, note: "مكافأة بيع محتوى Studio بنسبة 80%", createdAt: now });
+    return { orderId, amount: amount.toFixed(2), reward: reward.toFixed(2), buyerBalance: buyerNext.toFixed(2), ownerBalance: ownerNext.toFixed(2), purchaseAccountId, invoiceNumber, purchaseSource: input.buyerType === "merchant" ? "independent_merchant_purchase_account" : "customer_wallet" };
+  });
+}
+
+export async function listCommerceFundingAccounts(input?: { ownerUserId?: number; restaurantId?: number }) {
+  const db = await getDb(); if (!db) return [];
+  return db.select().from(commerceFundingAccounts).where(and(input?.ownerUserId ? eq(commerceFundingAccounts.ownerUserId, input.ownerUserId) : undefined, input?.restaurantId ? eq(commerceFundingAccounts.restaurantId, input.restaurantId) : undefined)).orderBy(desc(commerceFundingAccounts.updatedAt));
+}
+export async function getOrCreateMerchantCommerceFundingAccount(input: { userId: number; restaurantId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  let account = (await db.select().from(commerceFundingAccounts).where(and(eq(commerceFundingAccounts.restaurantId, input.restaurantId), eq(commerceFundingAccounts.accountType, "merchant_purchase"))).orderBy(desc(commerceFundingAccounts.updatedAt)).limit(1))[0];
+  if (!account) {
+    const result = await db.insert(commerceFundingAccounts).values({ ownerUserId: input.userId, restaurantId: input.restaurantId, accountType: "merchant_purchase", currencyCode: "SAR", availableBalance: "0.00", status: "active", createdByUserId: input.userId });
+    account = (await db.select().from(commerceFundingAccounts).where(eq(commerceFundingAccounts.id, Number(result[0].insertId))).limit(1))[0];
+  }
+  if (!account) throw new Error("تعذر تجهيز حساب مشتريات المحتوى");
+  const ledger = await db.select({ id: financialLedgerEntries.id, entryType: financialLedgerEntries.entryType, direction: financialLedgerEntries.direction, amount: financialLedgerEntries.amount, currencyCode: financialLedgerEntries.currencyCode, note: financialLedgerEntries.note, createdAt: financialLedgerEntries.createdAt }).from(financialLedgerEntries).where(eq(financialLedgerEntries.fundingAccountId, account.id)).orderBy(desc(financialLedgerEntries.createdAt)).limit(20);
+  return { account, ledger };
+}
+
+export async function listWhiteLabelWorkspaces() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(whiteLabelWorkspaces).orderBy(desc(whiteLabelWorkspaces.updatedAt));
+}
+
+export async function createWhiteLabelWorkspace(input: { ownerUserId: number; name: string; slug: string; logoUrl?: string | null; primaryColor?: string; accentColor?: string; customDomain?: string | null; defaultLocale?: string; enabledModules?: string[]; status?: "draft" | "active" | "suspended" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const name = input.name.trim();
+  const slug = input.slug.trim().toLowerCase();
+  if (name.length < 2 || name.length > 160) throw new Error("اسم مساحة White Label غير صالح");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new Error("المعرّف يجب أن يستخدم أحرفًا لاتينية وأرقامًا وشرطات فقط");
+  const color = (value: string | undefined, fallback: string) => /^#[0-9a-f]{6}$/i.test(value ?? "") ? value! : fallback;
+  const result = await db.insert(whiteLabelWorkspaces).values({ ownerUserId: input.ownerUserId, name, slug, logoUrl: input.logoUrl?.trim() || null, primaryColor: color(input.primaryColor, "#E76F3C"), accentColor: color(input.accentColor, "#172033"), customDomain: input.customDomain?.trim().toLowerCase() || null, defaultLocale: ["ar", "en", "fr", "ur"].includes(input.defaultLocale ?? "ar") ? input.defaultLocale ?? "ar" : "ar", enabledModulesJson: JSON.stringify(Array.from(new Set((input.enabledModules ?? []).map((module) => module.trim()).filter(Boolean))).slice(0, 40)), status: input.status ?? "draft" });
+  return Number(result[0].insertId);
+}
+
+export async function updateWhiteLabelWorkspace(id: number, input: { name?: string; logoUrl?: string | null; primaryColor?: string; accentColor?: string; customDomain?: string | null; defaultLocale?: string; enabledModules?: string[]; status?: "draft" | "active" | "suspended" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const values: Partial<typeof whiteLabelWorkspaces.$inferInsert> = { updatedAt: new Date() };
+  if (input.name !== undefined) values.name = input.name.trim().slice(0, 160);
+  if (input.logoUrl !== undefined) values.logoUrl = input.logoUrl?.trim() || null;
+  if (input.primaryColor !== undefined && /^#[0-9a-f]{6}$/i.test(input.primaryColor)) values.primaryColor = input.primaryColor;
+  if (input.accentColor !== undefined && /^#[0-9a-f]{6}$/i.test(input.accentColor)) values.accentColor = input.accentColor;
+  if (input.customDomain !== undefined) values.customDomain = input.customDomain?.trim().toLowerCase() || null;
+  if (input.defaultLocale !== undefined && ["ar", "en", "fr", "ur"].includes(input.defaultLocale)) values.defaultLocale = input.defaultLocale;
+  if (input.enabledModules !== undefined) values.enabledModulesJson = JSON.stringify(Array.from(new Set(input.enabledModules.map((module) => module.trim()).filter(Boolean))).slice(0, 40));
+  if (input.status !== undefined) values.status = input.status;
+  await db.update(whiteLabelWorkspaces).set(values).where(eq(whiteLabelWorkspaces.id, id));
+  return id;
+}
+
+export async function fundCommerceFundingAccount(input: { accountId: number; amount: string; paymentMethod: "manual" | "bank_transfer" | "card" | "online"; reference?: string | null; createdByUserId: number }) {
+  const db = await getDb(); if (!db) throw new Error("Database is not available");
+  const amount = Number(input.amount); if (!Number.isFinite(amount) || amount <= 0) throw new Error("مبلغ التمويل يجب أن يكون موجبًا");
+  return db.transaction(async (tx) => {
+    const account = (await tx.select().from(commerceFundingAccounts).where(and(eq(commerceFundingAccounts.id, input.accountId), eq(commerceFundingAccounts.status, "active"))).limit(1))[0];
+    if (!account) throw new Error("حساب المشتريات المستقل غير موجود أو غير نشط");
+    const nextBalance = Number(account.availableBalance) + amount; const now = new Date();
+    await tx.update(commerceFundingAccounts).set({ availableBalance: nextBalance.toFixed(2), updatedAt: now }).where(eq(commerceFundingAccounts.id, account.id));
+    const ledger = await tx.insert(financialLedgerEntries).values({ restaurantId: null, branchId: null, userId: account.ownerUserId, createdByUserId: input.createdByUserId, section: "content_purchase_account", entryType: "deposit", direction: "credit", amount: amount.toFixed(2), currencyCode: account.currencyCode, referenceType: "commerce_funding_deposit", referenceId: account.id, fundingAccountId: account.id, note: `تمويل مستقل عبر ${input.paymentMethod}${input.reference ? ` · ${input.reference}` : ""}` });
+    return { id: Number(ledger[0].insertId), accountId: account.id, balance: nextBalance.toFixed(2) };
+  });
+}
+
+export async function listAdminCustomerAccounts() {
+  const db = await getDb();
+  if (!db) return { customers: [], summary: { total: 0, active: 0, inactive: 0, listed: 0, sold: 0, purchased: 0, walletBalance: 0, grossSales: 0 } };
+  const [accounts, userRows, walletRows, listings, purchaseRows, profileRows, cardBindings] = await Promise.all([
+    db.select({ id: testAccounts.id, email: testAccounts.email, displayName: testAccounts.displayName, phone: testAccounts.phone, isActive: testAccounts.isActive, createdAt: testAccounts.createdAt }).from(testAccounts).where(eq(testAccounts.role, "customer")).orderBy(desc(testAccounts.createdAt)),
+    db.select({ id: users.id, openId: users.openId, lastSignedIn: users.lastSignedIn }).from(users),
+    db.select({ customerId: walletAccounts.customerId, balance: walletAccounts.balance }).from(walletAccounts),
+    db.select({ ownerUserId: contentListings.ownerUserId, status: contentListings.status }).from(contentListings),
+    db.select({ buyerUserId: contentPurchaseOrders.buyerUserId, customerUserId: contentPurchaseOrders.customerUserId, total: contentPurchaseOrders.total, status: contentPurchaseOrders.status }).from(contentPurchaseOrders),
+    db.select({ id: customerProfiles.id, userId: customerProfiles.userId, slug: customerProfiles.slug, email: customerProfiles.email, displayName: customerProfiles.displayName, phone: customerProfiles.phone, createdAt: customerProfiles.createdAt }).from(customerProfiles),
+    db.select({ userId: vcardCardBindings.userId }).from(vcardCardBindings).innerJoin(vcardCardCodes, eq(vcardCardBindings.codeId, vcardCardCodes.id)).where(eq(vcardCardCodes.status, "bound")),
+  ]);
+  const rawCustomers = [
+    ...accounts.map((account) => { const userId = userRows.find((candidate) => candidate.openId === `test_${account.id}`)?.id ?? null; const profile = profileRows.find((candidate) => candidate.userId === userId); return { sourceId: account.id, userId, customerProfileId: profile?.id ?? null, email: account.email, displayName: profile?.displayName ?? account.displayName, phone: account.phone, isActive: account.isActive, createdAt: account.createdAt, profileSlug: profile?.slug ?? null, lastSignedIn: userRows.find((candidate) => candidate.openId === `test_${account.id}`)?.lastSignedIn ?? null }; }),
+    ...profileRows.filter((profile) => !accounts.some((account) => userRows.find((candidate) => candidate.openId === `test_${account.id}`)?.id === profile.userId)).map((profile) => ({ sourceId: profile.userId, userId: profile.userId, customerProfileId: profile.id, email: profile.email ?? "بريد غير مسجل", displayName: profile.displayName ?? `عميل #${profile.userId}`, phone: profile.phone, isActive: true, createdAt: profile.createdAt, profileSlug: profile.slug, lastSignedIn: userRows.find((candidate) => candidate.id === profile.userId)?.lastSignedIn ?? null })),
+  ].map((account) => {
+    const wallet = account.userId ? walletRows.find((row) => row.customerId === account.userId) : undefined;
+    const listed = listings.filter((row) => row.ownerUserId === account.userId);
+    const soldOrders = purchaseRows.filter((row) => row.customerUserId === account.userId && row.status === "approved");
+    const purchasedOrders = purchaseRows.filter((row) => row.buyerUserId === account.userId && row.status === "approved");
+    const grossSales = soldOrders.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
+    return { id: account.sourceId, userId: account.userId, customerProfileId: account.customerProfileId ?? null, email: account.email, displayName: account.displayName, phone: account.phone, isActive: account.isActive, createdAt: account.createdAt, lastSignedIn: account.lastSignedIn, profileSlug: account.profileSlug ?? null, hasActiveNfc: Boolean(account.userId && cardBindings.some((binding) => binding.userId === account.userId)), walletBalance: Number(wallet?.balance ?? 0), listedCount: listed.length, soldCount: soldOrders.length, purchasedCount: purchasedOrders.length, grossSales };
+  });
+  const customerMap = new Map<string, (typeof rawCustomers)[number]>();
+  rawCustomers.forEach((customer) => {
+    const key = customer.email.includes("@") ? customer.email.trim().toLowerCase() : `user:${customer.userId ?? customer.id}`;
+    const previous = customerMap.get(key);
+    if (!previous) customerMap.set(key, customer);
+    else customerMap.set(key, { ...previous, userId: previous.userId ?? customer.userId, phone: previous.phone ?? customer.phone, isActive: previous.isActive || customer.isActive, createdAt: previous.createdAt < customer.createdAt ? previous.createdAt : customer.createdAt, lastSignedIn: previous.lastSignedIn ?? customer.lastSignedIn, profileSlug: previous.profileSlug ?? customer.profileSlug, hasActiveNfc: previous.hasActiveNfc || customer.hasActiveNfc, walletBalance: previous.walletBalance + customer.walletBalance, listedCount: previous.listedCount + customer.listedCount, soldCount: previous.soldCount + customer.soldCount, purchasedCount: previous.purchasedCount + customer.purchasedCount, grossSales: previous.grossSales + customer.grossSales });
+  });
+  const customers = Array.from(customerMap.values());
+  return { customers, summary: { total: customers.length, active: customers.filter((customer) => customer.isActive).length, inactive: customers.filter((customer) => !customer.isActive).length, listed: customers.reduce((sum, customer) => sum + customer.listedCount, 0), sold: customers.reduce((sum, customer) => sum + customer.soldCount, 0), purchased: customers.reduce((sum, customer) => sum + customer.purchasedCount, 0), walletBalance: customers.reduce((sum, customer) => sum + customer.walletBalance, 0), grossSales: customers.reduce((sum, customer) => sum + customer.grossSales, 0) } };
+}
+
+
+export async function listTrustedDevices(userId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(trustedDevices).where(userId ? eq(trustedDevices.userId, userId) : undefined).orderBy(desc(trustedDevices.lastSeenAt));
+}
+
+export async function registerTrustedDevice(input: { userId: number; fingerprintHash: string; deviceLabel: string; status?: "pending" | "active" | "revoked" | "blocked"; approvedByUserId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const existing = (await db.select({ id: trustedDevices.id, status: trustedDevices.status }).from(trustedDevices).where(and(eq(trustedDevices.userId, input.userId), eq(trustedDevices.fingerprintHash, input.fingerprintHash))).limit(1))[0];
+  const now = new Date();
+  if (existing) {
+    await db.update(trustedDevices).set({ deviceLabel: input.deviceLabel, lastSeenAt: now, status: input.status ?? existing.status, approvedByUserId: input.approvedByUserId ?? undefined, approvedAt: input.status === "active" ? now : undefined, updatedAt: now }).where(eq(trustedDevices.id, existing.id));
+    return existing.id;
+  }
+  const result = await db.insert(trustedDevices).values({ userId: input.userId, fingerprintHash: input.fingerprintHash, deviceLabel: input.deviceLabel, status: input.status ?? "pending", approvedByUserId: input.approvedByUserId ?? null, approvedAt: input.status === "active" ? now : null });
+  return Number(result[0].insertId);
+}
+
+export async function updateTrustedDevice(id: number, input: { status?: "pending" | "active" | "revoked" | "blocked"; approvedByUserId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const now = new Date();
+  await db.update(trustedDevices).set({ status: input.status, approvedByUserId: input.approvedByUserId, approvedAt: input.status === "active" ? now : undefined, revokedAt: input.status === "revoked" ? now : undefined, updatedAt: now }).where(eq(trustedDevices.id, id));
+}
+
+export async function createCustomerCardRequest(input: { requesterUserId: number; customerProfileId?: number | null; bindingId?: number | null; requestType: "print" | "replace_key" | "bind_key" | "update_key"; reason?: string | null; price?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const result = await db.insert(customerCardRequests).values({ requesterUserId: input.requesterUserId, customerProfileId: input.customerProfileId ?? null, bindingId: input.bindingId ?? null, requestType: input.requestType, reason: input.reason ?? null, price: input.price ?? null });
+  return Number(result[0].insertId);
+}
+
+export async function listCustomerCardRequests(requesterUserId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: customerCardRequests.id,
+    requesterUserId: customerCardRequests.requesterUserId,
+    customerProfileId: customerCardRequests.customerProfileId,
+    bindingId: customerCardRequests.bindingId,
+    requestType: customerCardRequests.requestType,
+    status: customerCardRequests.status,
+    reason: customerCardRequests.reason,
+    adminNote: customerCardRequests.adminNote,
+    price: customerCardRequests.price,
+    currency: customerCardRequests.currency,
+    resolvedByUserId: customerCardRequests.resolvedByUserId,
+    resolvedAt: customerCardRequests.resolvedAt,
+    createdAt: customerCardRequests.createdAt,
+    updatedAt: customerCardRequests.updatedAt,
+    profileDisplayName: customerProfiles.displayName,
+    profileSlug: customerProfiles.slug,
+  }).from(customerCardRequests).leftJoin(customerProfiles, eq(customerCardRequests.customerProfileId, customerProfiles.id)).where(requesterUserId ? eq(customerCardRequests.requesterUserId, requesterUserId) : undefined).orderBy(desc(customerCardRequests.createdAt));
+}
+
+export async function updateCustomerCardRequest(id: number, input: { status?: "pending" | "approved" | "rejected" | "fulfilled" | "cancelled"; adminNote?: string | null; price?: string | null; resolvedByUserId?: number | null; bindingId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(customerCardRequests).set({ status: input.status, adminNote: input.adminNote, price: input.price, resolvedByUserId: input.resolvedByUserId, bindingId: input.bindingId, resolvedAt: input.status && input.status !== "pending" ? new Date() : undefined, updatedAt: new Date() }).where(eq(customerCardRequests.id, id));
+}
+
+
+export async function provisionNasserTestCatalog(restaurantId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const categories = await db.select({ id: menuCategories.id, name: menuCategories.name }).from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId));
+  const imageByCategory = (name: string) => {
+    if (/قهوة|ساخنة|فطور/.test(name)) return "/manus-storage/nasser-test-coffee_5c37e7a4.jpg";
+    if (/حلويات|آيس كريم/.test(name)) return "/manus-storage/nasser-test-dessert_e51857b9.jpg";
+    if (/بيتزا/.test(name)) return "/manus-storage/nasser-test-pizza_6cc1f31f.jpg";
+    if (/سلطات|ورق عنب|مقبلات|عصائر|مشروبات باردة/.test(name)) return "/manus-storage/nasser-test-salad_74a069b2.jpg";
+    return "/manus-storage/nasser-test-burger_881b5d4f.jpg";
+  };
+  let created = 0;
+  let updated = 0;
+  for (const category of categories) {
+    for (let index = 1; index <= 10; index += 1) {
+      const name = `${category.name} اختبار ${String(index).padStart(2, "0")}`;
+      const existing = (await db.select({ id: menuItems.id }).from(menuItems).where(and(eq(menuItems.restaurantId, restaurantId), eq(menuItems.categoryId, category.id), eq(menuItems.name, name))).limit(1))[0];
+      const imageUrl = imageByCategory(category.name);
+      const price = (18 + (index * 3) + (Number(category.id) % 7)).toFixed(2);
+      const compareAtPrice = (Number(price) + 8).toFixed(2);
+      const translationsJson = JSON.stringify({ en: { name: `${category.name} Test ${String(index).padStart(2, "0")}`, description: "Test menu item for NFOOD delivery and menu layout testing." }, fr: { name: `${category.name} Test ${String(index).padStart(2, "0")}`, description: "Article de test pour vérifier le menu et la livraison NFOOD." } });
+      const values = { restaurantId, categoryId: category.id, name, description: `صنف اختبار رقم ${index} من قسم ${category.name} لاختبار الصورة والسعر والسلة والتفاصيل.`, price, compareAtPrice, imageUrl, translationsJson, tagsJson: JSON.stringify(["بيانات اختبار", "NFOOD"]), isAvailable: true, prepTimeMinutes: 10 + (index % 6), calories: 250 + (index * 35) };
+      if (existing) {
+        await db.update(menuItems).set(values).where(eq(menuItems.id, existing.id));
+        updated += 1;
+      } else {
+        await db.insert(menuItems).values(values);
+        created += 1;
+      }
+    }
+  }
+  return { restaurantId, categoryCount: categories.length, created, updated, total: categories.length * 10 };
+}
+
+export async function provisionNasserDeliveryTestData(restaurantId: number) {
+  const accounts = await provisionDeliveryDemoAccounts(restaurantId);
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const driver = accounts.find((account) => account.role === "driver");
+  if (!driver) throw new Error("تعذر تجهيز حساب السائق التجريبي");
+  const branchLatitude = "24.7136000";
+  const branchLongitude = "46.6753000";
+  await db.update(branches).set({ latitude: branchLatitude, longitude: branchLongitude, city: "الرياض" }).where(eq(branches.restaurantId, restaurantId));
+  const latitude = "24.8200000";
+  const longitude = "46.7000000";
+  await db.update(remoteWorkers).set({ latitude, longitude, lastLocationAt: new Date(), isActive: true, isAvailable: true, vehicleType: "سيارة اختبار" }).where(and(eq(remoteWorkers.restaurantId, restaurantId), eq(remoteWorkers.userId, driver.userId), eq(remoteWorkers.role, "driver")));
+  const branch = (await db.select({ id: branches.id }).from(branches).where(eq(branches.restaurantId, restaurantId)).limit(1))[0];
+  const testOrders: number[] = [];
+  if (branch) {
+    for (let index = 1; index <= 5; index += 1) {
+      const clientRequestId = `nasser-driver-test-${restaurantId}-${index}`;
+      const existing = (await db.select({ id: orders.id }).from(orders).where(and(eq(orders.restaurantId, restaurantId), eq(orders.clientRequestId, clientRequestId))).limit(1))[0];
+      if (existing) { testOrders.push(existing.id); continue; }
+      const inserted = await db.insert(orders).values({ restaurantId, branchId: branch.id, clientRequestId, channel: "delivery", paymentMethod: "cash", paymentStatus: "unpaid", driverId: driver.userId, status: "new", deliveryStatus: "assigned", guestName: `عميل اختبار ${index}`, guestPhone: `05000000${String(index).padStart(2, "0")}`, deliveryAddress: `عنوان اختبار ${index}، الرياض`, deliveryNote: "طلب اختبار للسائق فقط", total: (25 + index * 5).toFixed(2) });
+      testOrders.push(Number(inserted[0].insertId));
+    }
+  }
+  return { restaurantId, driver, testOrders, branch: { latitude: branchLatitude, longitude: branchLongitude, reference: "برج المملكة" }, location: { latitude, longitude, reference: "ضمن نطاق الاختبار 10–20 كم من برج المملكة" } };
+}

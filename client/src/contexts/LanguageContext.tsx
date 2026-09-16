@@ -1,0 +1,1329 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { LANGUAGE_LOCALES, isEnterpriseLanguage, type EnterpriseLanguage } from "@/lib/enterpriseFormatting";
+import arLocale from "@/locales/ar.json";
+import enLocale from "@/locales/en.json";
+import frLocale from "@/locales/fr.json";
+
+export type Language = EnterpriseLanguage;
+export const LANGUAGE_STORAGE_KEY = "nfood-language";
+export const DASHBOARD_LANGUAGE_STORAGE_KEY = "nfood-dashboard-language";
+export const MENU_LANGUAGE_STORAGE_KEY = "nfood-menu-language";
+export const MENU_LANGUAGE_MANUAL_STORAGE_KEY = "nfood-menu-language-manual";
+export function isPublicLanguagePath(pathname: string) { return pathname.startsWith("/menu/") || pathname.startsWith("/restaurant/"); }
+export function languageStorageKey(pathname?: string) { const currentPath = pathname ?? (typeof window !== "undefined" ? window.location.pathname : "/"); return isPublicLanguagePath(currentPath) ? MENU_LANGUAGE_STORAGE_KEY : DASHBOARD_LANGUAGE_STORAGE_KEY; }
+export const UI_LANGUAGES = ["ar", "en", "fr"] as const;
+export type UiLanguage = (typeof UI_LANGUAGES)[number];
+export function isUiLanguage(value: unknown): value is UiLanguage { return UI_LANGUAGES.includes(value as UiLanguage); }
+export function detectVisitorLanguage(): Language { if (typeof window === "undefined") return "ar"; const browser = window.navigator.language.toLowerCase().split("-")[0]; return isUiLanguage(browser) ? browser : "ar"; }
+
+function animateLanguageChange() {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.remove("nfood-language-transition");
+  void document.documentElement.offsetWidth;
+  document.documentElement.classList.add("nfood-language-transition");
+  window.setTimeout(() => document.documentElement.classList.remove("nfood-language-transition"), 260);
+}
+
+export const languageMeta: Record<Language, { label: string; nativeLabel: string; dir: "rtl" | "ltr"; locale: string }> = LANGUAGE_LOCALES;
+
+export function formatGregorianDate(input: Date | string | number, language: Language = "en") {
+  const meta = languageMeta[language];
+  const locale = meta.locale === "ar-SA" ? "ar-SA-u-ca-gregory-nu-latn" : meta.locale;
+  return new Intl.DateTimeFormat(locale, { calendar: "gregory", numberingSystem: "latn", timeZone: "Asia/Riyadh", dateStyle: "medium" }).format(new Date(input));
+}
+
+export function formatLatinNumber(input: number, language: Language = "en") {
+  const locale = `${languageMeta[language].locale}-u-nu-latn`;
+  return new Intl.NumberFormat(locale).format(input);
+}
+
+export function formatCurrencyAmount(input: number | string, currency = "SAR", language: Language = "en", decimals = 2) {
+  const value = Number(input);
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const locale = language === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : language === "fr" ? "fr-FR" : "en-US";
+  const amount = new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(safeValue);
+  const label = language === "ar" && currency === "SAR" ? "ر.س" : currency;
+  return `${amount} ${label}`;
+}
+
+const arabic = {
+  dashboard: "لوحة التحكم", overview: "نظرة عامة", platformAdmin: "إدارة المنصة", restaurant: "المطعم", branch: "الفرع", branches: "الفروع والإعدادات", language: "اللغة", save: "حفظ", cancel: "إلغاء", signOut: "تسجيل الخروج", switchAccount: "تبديل الحساب", search: "بحث شامل", chooseLanguage: "اختر اللغة", languageSaved: "تم حفظ اللغة", workspace: "مساحة العمل", noRestaurant: "لا يوجد مطعم مرتبط", noBranch: "لا يوجد فرع مرتبط", notifications: "الإشعارات", noNotifications: "لا توجد إشعارات", globalSearch: "ابحث في الوحدات والطلبات...", noResults: "لا توجد نتائج مطابقة.", loading: "جارٍ التحميل...", retry: "إعادة المحاولة", requestId: "رقم الطلب", empty: "لا توجد بيانات محفوظة بعد.", error: "تعذر تحميل البيانات.", newOrder: "طلب جديد", newRestaurant: "مطعم جديد", orders: "إدارة الطلبات", pos: "نقطة البيع POS", kds: "شاشة المطبخ KDS", menu: "المنيو", tables: "الطاولات", inventory: "المخزون", team: "الموظفون والحضور", marketing: "التسويق والحملات", reservations: "الحجوزات", remote: "العمل عن بُعد", security: "الأمان والحساب والجلسات", health: "صحة النظام", payments: "المدفوعات", customers: "العملاء", drivers: "السائقون", kitchen: "المطبخ", cashier: "الكاشير", waiter: "النادل", customer: "العميل", driver: "السائق", subscription: "الاشتراك", managePlan: "إدارة الباقة", enableNotifications: "تفعيل إشعارات NFOOD", installApp: "تثبيت تطبيق NFOOD", installed: "تطبيق NFOOD مثبت على هذا الجهاز", sessionChecking: "جارٍ التحقق من الجلسة...", signIn: "تسجيل الدخول", signInToContinue: "سجّل الدخول للمتابعة", welcomeBack: "مرحبًا بعودتك", email: "البريد الإلكتروني", password: "كلمة المرور", continueWithGoogle: "الدخول عبر Google / OAuth", joinRestaurant: "انضم إلى NFOOD كمطعم شريك", name: "الاسم", phone: "رقم الجوال", country: "الدولة", city: "المدينة", createAccount: "إنشاء الحساب", submit: "إرسال", next: "التالي", back: "رجوع", status: "الحالة", active: "نشطة", inactive: "غير نشطة", draft: "مسودة", scheduled: "مجدولة", completed: "مكتمل", pending: "قيد الانتظار", confirmed: "مؤكد", cancelled: "ملغى", preparing: "قيد التحضير", ready: "جاهز", paid: "مدفوع", unpaid: "غير مدفوع", total: "الإجمالي", today: "اليوم", salesToday: "مبيعات اليوم", ordersToday: "طلبات اليوم", averageOrder: "متوسط قيمة الطلب", occupiedTables: "الطاولات المشغولة", lastSevenDays: "آخر 7 أيام", createCampaign: "حملة جديدة", birthday: "أعياد الميلاد", reengagement: "إعادة تفاعل", general: "عامة", expectedAudience: "الجمهور المتوقع", providerNotReady: "الإرسال متوقف حتى إعداد مزود الرسائل", createCoupon: "كوبون جديد", discount: "الخصم", usageLimit: "حد الاستخدام", kitchenSections: "أقسام المطبخ", printers: "الطابعات", delivery: "التوصيل", eta: "الوقت المتوقع", vehicle: "وسيلة التوصيل", documents: "الوثائق", loyalty: "الولاء", reviews: "التقييمات", map: "الخريطة", analytics: "التحليلات", platformHealth: "صحة المنصة", support: "الدعم", forbidden: "ليس لديك صلاحية الوصول إلى هذه الميزة", comingSoon: "هذه الميزة قيد التجهيز", required: "هذا الحقل مطلوب", invalidEmail: "أدخل بريدًا إلكترونيًا صحيحًا", invalidPhone: "أدخل رقم جوال صحيحًا", minLength: "القيمة قصيرة جدًا", selectRestaurant: "اختر المطعم", selectBranch: "اختر الفرع", saved: "تم الحفظ بنجاح", deleted: "تم الحذف بنجاح", loadingRestaurant: "جارٍ تحميل المطعم...", loadingRestaurants: "جارٍ تحميل المطاعم...", loadingBranches: "جارٍ تحميل الفروع...", noRestaurants: "لا توجد مطاعم", noBranches: "لا توجد فروع", searchPlaceholder: "بحث شامل", platform: "المنصة", restaurantOperatingSystem: "نظام تشغيل المطاعم", allRoles: "كل الأدوار", admin: "الأدمن", staff: "الفريق", remoteWorker: "موظف عن بُعد", revenue: "الإيرادات", mrr: "الإيراد الشهري المتكرر", arr: "الإيراد السنوي المتكرر", churn: "معدل الانسحاب", activeRestaurants: "المطاعم النشطة", mediaLibrary: "مكتبة الملفات", overviewDescription: "مركز التحكم في العمليات والبيانات والصلاحيات.", languageDirection: "اتجاه الواجهة", rtl: "من اليمين إلى اليسار", ltr: "من اليسار إلى اليمين", workspaceTagline: "مساحة واحدة لكل فريقك", loginDescription: "أدخل بياناتك، وسنوجهك إلى مساحة العمل المناسبة.", unifiedSignIn: "دخول موحد", chooseAccount: "اختر الحساب المناسب، وستظهر لك لوحتك وصلاحياتك تلقائيًا.", secureSignIn: "دخول آمن", signingIn: "جارٍ الدخول إلى مساحتك...", passwordPlaceholder: "أدخل كلمة المرور", or: "أو", loginFooter: "تسجيل الدخول موحد للأدمن والمطعم والفريق والعملاء والسائقين. يتم تحديد لوحة التحكم تلقائيًا حسب الدور.", demoIntegrations: "Google وOTP وPasskey في وضع Demo معطّل.", demoRestaurant: "Nasser Cafe · مطعم تجريبي", demoRestaurantDescription: "مساحة مطعم جاهزة لتجربة المنيو والطلبات والإدارة.", useDemoRestaurant: "استخدام مطعم ناصر التجريبي", demoIntegrationsNote: "استبدل مفاتيح DEMO_* من مركز التكاملات ثم فعّل الطريقة قبل استخدامها في الإنتاج.", operations: "التشغيل", accountPlatform: "الحساب والمنصة", advancedAdminApp: "تطبيق Admin Web المتقدم", advancedAdminDescription: "إدارة المطاعم والباقات والمميزات والصلاحيات من تطبيق قابل للتثبيت.", installedOnDevice: "مثبت على هذا الجهاز", installAvailableBrowser: "يمكن التثبيت من قائمة المتصفح عند استيفاء الشروط", platformSettingsCenter: "مركز إعدادات المنصة", integrationsCenter: "مركز البوابات والتكاملات", restaurantPortals: "بوابات المطعم", subscriptionLabel: "الاشتراك", subscriptionDetails: "تظهر تفاصيل الباقة والفترة من بيانات الاشتراك المحفوظة في لوحة الإدارة.", notificationsEnabled: "إشعارات NFOOD مفعّلة", generalSettings: "الإعدادات العامة", qrCustomization: "تخصيص QR والباركود", openPublicMenu: "فتح منيو المطعم العامة", openNotifications: "فتح الإشعارات", profileMenu: "فتح قائمة الملف الشخصي", accountImageSettings: "إعدادات صورة الحساب", publicProfileSettings: "إعدادات الملف العام وvCard", logout: "تسجيل الخروج", currentRoleSpace: "مساحة الدور", restaurantManagementCenter: "مركز إدارة المطعم", trackOperations: "تابع الطلبات والفروع والعمليات اليومية من لوحة المطعم.", openOrders: "الطلبات المفتوحة", manageBranches: "إدارة الفروع", openMenu: "فتح المنيو", noOrders: "لا توجد طلبات حتى الآن", ordersAppear: "ستظهر الطلبات الجديدة هنا عند استقبالها من نقطة البيع.", module: "وحدة", openNavigation: "فتح قائمة التنقل", closeNavigation: "إغلاق قائمة التنقل",
+} as const;
+
+const english: Record<keyof typeof arabic, string> = {
+  dashboard: "Dashboard", overview: "Overview", platformAdmin: "Platform Admin", restaurant: "Restaurant", branch: "Branch", branches: "Branches & settings", language: "Language", save: "Save", cancel: "Cancel", signOut: "Sign out", switchAccount: "Switch account", search: "Global search", chooseLanguage: "Choose language", languageSaved: "Language saved", workspace: "Workspace", noRestaurant: "No restaurant linked", noBranch: "No branch linked", notifications: "Notifications", noNotifications: "No notifications", globalSearch: "Search modules and orders...", noResults: "No matching results.", loading: "Loading...", retry: "Retry", requestId: "Request ID", empty: "No saved data yet.", error: "Unable to load data.", newOrder: "New order", newRestaurant: "New restaurant", orders: "Orders", pos: "POS", kds: "Kitchen display", menu: "Menu", tables: "Tables", inventory: "Inventory", team: "Team & attendance", marketing: "Marketing & campaigns", reservations: "Reservations", remote: "Remote work", security: "Security & sessions", health: "System health", payments: "Payments", customers: "Customers", drivers: "Drivers", kitchen: "Kitchen", cashier: "Cashier", waiter: "Waiter", customer: "Customer", driver: "Driver", subscription: "Subscription", managePlan: "Manage plan", enableNotifications: "Enable NFOOD notifications", installApp: "Install NFOOD app", installed: "NFOOD is installed on this device", sessionChecking: "Checking your session...", signIn: "Sign in", signInToContinue: "Sign in to continue", welcomeBack: "Welcome back", email: "Email", password: "Password", continueWithGoogle: "Continue with Google / OAuth", joinRestaurant: "Join NFOOD as a restaurant partner", name: "Name", phone: "Phone", country: "Country", city: "City", createAccount: "Create account", submit: "Submit", next: "Next", back: "Back", status: "Status", active: "Active", inactive: "Inactive", draft: "Draft", scheduled: "Scheduled", completed: "Completed", pending: "Pending", confirmed: "Confirmed", cancelled: "Cancelled", preparing: "Preparing", ready: "Ready", paid: "Paid", unpaid: "Unpaid", total: "Total", today: "Today", salesToday: "Sales today", ordersToday: "Orders today", averageOrder: "Average order value", occupiedTables: "Occupied tables", lastSevenDays: "Last 7 days", createCampaign: "New campaign", birthday: "Birthday", reengagement: "Re-engagement", general: "General", expectedAudience: "Expected audience", providerNotReady: "Sending is paused until a messaging provider is configured", createCoupon: "New coupon", discount: "Discount", usageLimit: "Usage limit", kitchenSections: "Kitchen sections", printers: "Printers", delivery: "Delivery", eta: "ETA", vehicle: "Vehicle", documents: "Documents", loyalty: "Loyalty", reviews: "Reviews", map: "Map", analytics: "Analytics", platformHealth: "Platform health", support: "Support", forbidden: "You do not have access to this feature", comingSoon: "This feature is being prepared", required: "This field is required", invalidEmail: "Enter a valid email", invalidPhone: "Enter a valid phone number", minLength: "Value is too short", selectRestaurant: "Select restaurant", selectBranch: "Select branch", saved: "Saved successfully", deleted: "Deleted successfully", loadingRestaurant: "Loading restaurant...", loadingRestaurants: "Loading restaurants...", loadingBranches: "Loading branches...", noRestaurants: "No restaurants", noBranches: "No branches", searchPlaceholder: "Global search", platform: "Platform", restaurantOperatingSystem: "Restaurant operating system", allRoles: "All roles", admin: "Admin", staff: "Staff", remoteWorker: "Remote worker", revenue: "Revenue", mrr: "Monthly recurring revenue", arr: "Annual recurring revenue", churn: "Churn rate", activeRestaurants: "Active restaurants", mediaLibrary: "Media library", overviewDescription: "Control center for operations, data, and permissions.", languageDirection: "Interface direction", rtl: "Right to left", ltr: "Left to right", workspaceTagline: "One space for your entire team", loginDescription: "Enter your details and we will direct you to the right workspace.", unifiedSignIn: "Unified sign-in", chooseAccount: "Choose the right account and we will show your workspace and permissions automatically.", secureSignIn: "Secure sign in", signingIn: "Signing you in...", passwordPlaceholder: "Enter your password", or: "or", loginFooter: "One sign-in for admins, restaurants, teams, customers, and drivers. Your workspace is selected automatically by role.", demoIntegrations: "Google, OTP, and Passkey are disabled in Demo mode.", demoRestaurant: "Nasser Cafe · Demo Restaurant", demoRestaurantDescription: "A preloaded restaurant workspace for testing the menu, orders, and admin tools.", useDemoRestaurant: "Use Nasser Cafe demo", demoIntegrationsNote: "Replace DEMO_* keys in Integrations, then enable the method before using it in production.", operations: "Operations", accountPlatform: "Account & platform", advancedAdminApp: "Advanced Admin Web app", advancedAdminDescription: "Manage restaurants, plans, features, and permissions from an installable app.", installedOnDevice: "Installed on this device", installAvailableBrowser: "Install from the browser menu when requirements are met", platformSettingsCenter: "Platform settings center", integrationsCenter: "Gateways & integrations", restaurantPortals: "Restaurant gateways", subscriptionLabel: "Subscription", subscriptionDetails: "Plan and period details come from saved subscription data.", notificationsEnabled: "NFOOD notifications enabled", generalSettings: "General settings", qrCustomization: "QR & barcode customization", openPublicMenu: "Open public restaurant menu", openNotifications: "Open notifications", profileMenu: "Open profile menu", accountImageSettings: "Account image settings", publicProfileSettings: "Public profile & vCard settings", logout: "Sign out", currentRoleSpace: "Role workspace", restaurantManagementCenter: "Restaurant management center", trackOperations: "Track orders, branches, and daily operations from the restaurant dashboard.", openOrders: "Open orders", manageBranches: "Manage branches", openMenu: "Open menu", noOrders: "No orders yet", ordersAppear: "New orders will appear here when received from POS.", module: "Module", openNavigation: "Open navigation", closeNavigation: "Close navigation",
+};
+
+const french: Record<keyof typeof arabic, string> = {
+  dashboard: "Tableau de bord", overview: "Vue d’ensemble", platformAdmin: "Administration", restaurant: "Restaurant", branch: "Succursale", branches: "Succursales et réglages", language: "Langue", save: "Enregistrer", cancel: "Annuler", signOut: "Se déconnecter", switchAccount: "Changer de compte", search: "Recherche globale", chooseLanguage: "Choisir la langue", languageSaved: "Langue enregistrée", workspace: "Espace de travail", noRestaurant: "Aucun restaurant lié", noBranch: "Aucune succursale liée", notifications: "Notifications", noNotifications: "Aucune notification", globalSearch: "Rechercher des modules et commandes...", noResults: "Aucun résultat.", loading: "Chargement...", retry: "Réessayer", requestId: "Identifiant de demande", empty: "Aucune donnée enregistrée.", error: "Impossible de charger les données.", newOrder: "Nouvelle commande", newRestaurant: "Nouveau restaurant", orders: "Commandes", pos: "POS", kds: "Écran cuisine", menu: "Menu", tables: "Tables", inventory: "Stock", team: "Équipe et présence", marketing: "Marketing et campagnes", reservations: "Réservations", remote: "Travail à distance", security: "Sécurité et sessions", health: "État du système", payments: "Paiements", customers: "Clients", drivers: "Livreurs", kitchen: "Cuisine", cashier: "Caissier", waiter: "Serveur", customer: "Client", driver: "Livreur", subscription: "Abonnement", managePlan: "Gérer l’offre", enableNotifications: "Activer les notifications NFOOD", installApp: "Installer l’application NFOOD", installed: "NFOOD est installé sur cet appareil", sessionChecking: "Vérification de la session...", signIn: "Connexion", signInToContinue: "Connectez-vous pour continuer", welcomeBack: "Bon retour", email: "E-mail", password: "Mot de passe", continueWithGoogle: "Continuer avec Google / OAuth", joinRestaurant: "Rejoindre NFOOD comme restaurant partenaire", name: "Nom", phone: "Téléphone", country: "Pays", city: "Ville", createAccount: "Créer un compte", submit: "Envoyer", next: "Suivant", back: "Retour", status: "Statut", active: "Active", inactive: "Inactive", draft: "Brouillon", scheduled: "Planifiée", completed: "Terminée", pending: "En attente", confirmed: "Confirmée", cancelled: "Annulée", preparing: "En préparation", ready: "Prête", paid: "Payée", unpaid: "Non payée", total: "Total", today: "Aujourd’hui", salesToday: "Ventes du jour", ordersToday: "Commandes du jour", averageOrder: "Valeur moyenne", occupiedTables: "Tables occupées", lastSevenDays: "7 derniers jours", createCampaign: "Nouvelle campagne", birthday: "Anniversaire", reengagement: "Réengagement", general: "Générale", expectedAudience: "Audience prévue", providerNotReady: "Envoi suspendu jusqu’à la configuration du fournisseur", createCoupon: "Nouveau coupon", discount: "Remise", usageLimit: "Limite d’utilisation", kitchenSections: "Sections de cuisine", printers: "Imprimantes", delivery: "Livraison", eta: "Heure estimée", vehicle: "Véhicule", documents: "Documents", loyalty: "Fidélité", reviews: "Avis", map: "Carte", analytics: "Analytique", platformHealth: "État de la plateforme", support: "Support", forbidden: "Vous n’avez pas accès à cette fonctionnalité", comingSoon: "Cette fonctionnalité est en préparation", required: "Ce champ est obligatoire", invalidEmail: "Saisissez un e-mail valide", invalidPhone: "Saisissez un téléphone valide", minLength: "La valeur est trop courte", selectRestaurant: "Choisir un restaurant", selectBranch: "Choisir une succursale", saved: "Enregistré", deleted: "Supprimé", loadingRestaurant: "Chargement du restaurant...", loadingRestaurants: "Chargement des restaurants...", loadingBranches: "Chargement des succursales...", noRestaurants: "Aucun restaurant", noBranches: "Aucune succursale", searchPlaceholder: "Recherche globale", platform: "Plateforme", restaurantOperatingSystem: "Système d’exploitation des restaurants", allRoles: "Tous les rôles", admin: "Administrateur", staff: "Équipe", remoteWorker: "Travailleur à distance", revenue: "Revenus", mrr: "Revenu mensuel récurrent", arr: "Revenu annuel récurrent", churn: "Taux d’attrition", activeRestaurants: "Restaurants actifs", mediaLibrary: "Bibliothèque de fichiers", overviewDescription: "Centre de contrôle des opérations, données et permissions.", languageDirection: "Direction de l’interface", rtl: "De droite à gauche", ltr: "De gauche à droite", workspaceTagline: "Un espace pour toute votre équipe", loginDescription: "Saisissez vos informations pour accéder à l’espace de travail adapté.", unifiedSignIn: "Connexion unifiée", chooseAccount: "Choisissez le bon compte pour afficher automatiquement votre espace et vos permissions.", secureSignIn: "Connexion sécurisée", signingIn: "Connexion en cours...", passwordPlaceholder: "Saisissez votre mot de passe", or: "ou", loginFooter: "Une connexion pour les administrateurs, restaurants, équipes, clients et livreurs. L’espace est choisi selon le rôle.", demoIntegrations: "Google, OTP et Passkey sont désactivés en mode Démo.", demoRestaurant: "Nasser Cafe · Restaurant de démonstration", demoRestaurantDescription: "Un espace préchargé pour tester le menu, les commandes et l’administration.", useDemoRestaurant: "Utiliser la démo Nasser Cafe", demoIntegrationsNote: "Remplacez les clés DEMO_* dans les intégrations avant l’utilisation en production.", operations: "Opérations", accountPlatform: "Compte et plateforme", advancedAdminApp: "Application Admin Web avancée", advancedAdminDescription: "Gérez restaurants, offres, fonctionnalités et permissions depuis une application installable.", installedOnDevice: "Installée sur cet appareil", installAvailableBrowser: "Installez depuis le menu du navigateur lorsque les conditions sont remplies", platformSettingsCenter: "Centre des réglages de la plateforme", integrationsCenter: "Passerelles et intégrations", restaurantPortals: "Passerelles du restaurant", subscriptionLabel: "Abonnement", subscriptionDetails: "Les détails de l’offre et de la période proviennent des données enregistrées.", notificationsEnabled: "Notifications NFOOD activées", generalSettings: "Réglages généraux", qrCustomization: "Personnalisation QR et codes-barres", openPublicMenu: "Ouvrir le menu public du restaurant", openNotifications: "Ouvrir les notifications", profileMenu: "Ouvrir le profil", accountImageSettings: "Réglages de l’image du compte", publicProfileSettings: "Profil public et vCard", logout: "Se déconnecter", currentRoleSpace: "Espace du rôle", restaurantManagementCenter: "Centre de gestion du restaurant", trackOperations: "Suivez commandes, succursales et opérations quotidiennes depuis le tableau de bord.", openOrders: "Commandes ouvertes", manageBranches: "Gérer les succursales", openMenu: "Ouvrir le menu", noOrders: "Aucune commande", ordersAppear: "Les nouvelles commandes apparaîtront ici depuis le POS.", module: "Module", openNavigation: "Ouvrir la navigation", closeNavigation: "Fermer la navigation",
+};
+
+export const legacyUiTranslations: Partial<Record<Exclude<Language, "ar">, Record<string, string>>> = {
+  en: {
+    "· جارٍ التحديث": "· Updating", "+100 أو -50 نقطة": "+100 or -50 points", "0 د": "0 min", "12,840 ر.س": "12,840 SAR", "2FA مفعّل — تعطيل": "2FA enabled — Disable", "56% إشغال": "56% occupancy", "68.20 ر.س": "68.20 SAR", "69.03 ر.س": "69.03 SAR", "8,460 ر.س": "8,460 SAR", "Churn آخر 30 يومًا": "Churn last 30 days", "IP غير متاح": "IP not available", "POS وKDS": "POS and KDS", "SMS واتصالات متعددة الدول.": "SMS and multi-country calls.", "أخرى": "Other", "أدخل اسم العميل والموعد": "Enter customer name and appointment", "أدخل رقم العميل لعرض الحساب": "Enter customer number to view account", "أدخل رقم العميل ورمز إحالة من 3 أحرف على الأقل": "Enter customer number and a referral code of at least 3 characters", "أدخل رقم عميل ونقاطًا صحيحة غير صفرية": "Enter customer number and a nonzero valid points value", "أدخل رقم هاتف صالحًا": "Enter a valid phone number", "أدر الأجهزة والجلسات والتحقق بخطوتين.": "Manage devices, sessions, and two-factor authentication.", "أدر المطاعم والباقات والإعدادات المركزية دون وحدات تشغيل المطاعم.": "Manage restaurants, packages, and central settings without restaurant operating units.", "أرغب بالعمل عن بُعد": "I want to work remotely", "أكمل البيانات المطلوبة بصيغة صحيحة": "Complete the required information correctly", "أمان الحساب": "Account security", "أنشئ طلباً جديداً بسرعة واربطه بالفرع والطاولة.": "Create a new order quickly and link it to the branch and table.", "أنشئ طلبًا جديدًا وتحقق من حالة الدفع والطلبات المكتملة.": "Create a new order and check payment status and completed orders.", "أنشئ مهامًا مدفوعة وتواصل مع الموظفين من مكان واحد.": "Create paid tasks and communicate with staff from one place.", "أيام الخمول": "Inactive days", "إجمالي الشراء": "Total purchase", "إجمالي الطلبات": "Total orders", "إدارة التصنيفات والأصناف والأسعار والتوفر.": "Manage categories, items, prices, and availability.", "إدارة الطاولات": "Manage tables", "إدارة الطلبات": "Manage orders", "إدارة الفروع": "Manage branches", "إدارة الفروع وساعات العمل وإعداداتها التشغيلية.": "Manage branches, working hours, and operational settings.", "إدارة الفريق": "Manage team", "إدارة الفريق والأدوار وسجل الحضور.": "Manage team, roles, and attendance records.", "إدارة المطاعم والعملاء والاشتراكات والصلاحيات.": "Manage restaurants, customers, subscriptions, and permissions.", "إدارة مواعيد الضيوف وحالات الوصول من مساحة المطعم.": "Manage guest appointments and arrival statuses from the restaurant space.", "إرسال الطلب للمطبخ": "Send order to kitchen", "إشعارات الأنظمة الخارجية.": "External system notifications", "إضافة طاولة": "Add table", "إضافة فرع": "Add branch", "إضافة مادة": "Add material", "إضافة موظف": "Add employee", "إعدادات الموقع والصفحة الأولى": "Site and homepage settings", "إنشاء الاشتراك": "Create subscription", "إنشاء الدور": "Create role", "إنشاء العميل": "Create customer", "إنشاء مهمة": "Create task", "ابدأ بالطلبات الجديدة ثم انقلها إلى التحضير والجاهزية.": "Start with new orders, then move them to preparation and readiness.", "اختر الفرع": "Select branch", "اختر المطعم": "Select restaurant", "اختر قسم المطبخ أولاً": "Choose the kitchen section first", "اختر موعدًا مستقبليًا صالحًا": "Choose a valid future appointment", "اختيار الفرع": "Choose branch", "اختيار المطعم": "Choose restaurant", "اختيار لون الهوية": "Choose brand color", "اذكر المطلوب، الحساب أو القناة، وطريقة التسليم...": "Specify what's needed: account or channel, and delivery method...", "استعرض طلباتك الأخيرة وأعد الطلب من المساحة الموحدة.": "Review your recent orders and reorder from the unified space.", "اسم التصنيف": "Category name", "اسم الحملة": "Campaign name", "اسم الدور": "Role name", "اسم الصنف": "Item name", "اسم الضيف": "Guest name", "اسم الطاولة": "Table name", "اسم العميل": "Customer name", "اسم الفرع": "Branch name", "اسم القسم: المطبخ الساخن": "Section name: Hot kitchen", "اسم المادة": "Material name", "اسم المطعم للعملاء": "Restaurant name (for customers)", "اسم المورد": "Supplier name", "اسم الموظف": "Employee name", "اسم الموقع": "Site name", "اسم قسم المطبخ": "Kitchen section name", "اسمح بالنوافذ المنبثقة للطباعة": "Allow pop-up windows for printing", "اكتب اسم القسم أولاً": "Type the section name first", "اكتب رسالة...": "Type a message...", "اكتب نطاق المنصة بصيغة https://nfood.io": "Enter the platform domain in the format https://nfood.io", "اكتشف أصنافنا المختارة والمحضرة بعناية.": "Discover our selected, carefully prepared dishes.", "الآن": "Now", "الإعدادات الافتراضية للمنصة قبل تخصيص المطعم.": "Platform default settings before customizing the restaurant.", "الاسم كما في الهوية": "Name as on ID", "البداية": "Start", "البريد الإلكتروني اختياري": "Email (optional)", "البيانات": "Data", "التحليلات": "Analytics", "التسويق": "Marketing", "التكاملات": "Integrations", "الحجوزات": "Reservations", "الحجوزات وقائمة الانتظار": "Reservations and waitlist", "الحد الأدنى": "Minimum", "الحد الافتراضي": "Default limit", "الحماية": "Security", "الحملات محفوظة في قاعدة البيانات مع عزل المطعم.": "Campaigns are stored in the database with restaurant isolation.", "الخرائط": "Maps", "الخرائط والعناوين وحساب المسارات.": "Maps, addresses, and route calculation.", "الخصم %": "Discount %", "الدعم": "Support", "الدفع": "Payment", "الدفع الآجل والتقسيط.": "Deferred payment and installments.", "الدفع نقدي عند الاستلام": "Cash on delivery", "الدور": "Role", "الدور المطلوب": "Required role", "الرسائل": "Messages", "الرياض": "Riyadh", "السعر الشهري": "Monthly price", "السعودية": "Saudi Arabia", "الصفحات القانونية": "Legal pages", "الضيوف": "Guests", "الطلب غير موجود في بيانات backend الحالية": "Order not found in current backend data", "الطلب مكتمل بالفعل": "Order already completed", "الطلبات الجديدة": "New orders", "العروض والكوبونات والحملات في مكان واحد.": "Offers, coupons, and campaigns in one place.", "العملة": "Currency", "العنوان والمزايا والعروض الخاصة بالمطعم": "Restaurant address, features, and special offers", "العنوان والوصف والمزايا": "Address, description, and features", "الفروع محفوظة في قاعدة البيانات مع عزل المطعم.": "Branches are stored in the database with restaurant isolation.", "الكل": "All", "الكمية الحالية": "Current quantity", "اللغات": "Languages", "اللغة والعملة والمنطقة": "Language, currency, and region", "المبيعات": "Sales", "المتصفح الحالي لا يدعم إشعارات Push": "The current browser does not support Push notifications", "المخزون": "Inventory", "المراجعة": "Review", "المركبة من الأمام": "Front of vehicle", "المركبة من الخلف": "Rear of vehicle", "المركبة من اليسار": "Left side of vehicle", "المركبة من اليمين": "Right side of vehicle", "المستندات أو الباقة": "Documents or package", "المطاعم النشطة": "Active restaurants", "المنتج": "Product", "المنصة": "Platform", "المنطقة الزمنية": "Time zone", "المهام عن بُعد": "Remote tasks", "الهوية": "Identity", "الوحدة": "Unit", "اليوم": "Day", "بانتظار المراجعة": "Pending review", "بانتظار النادل": "Waiting for waiter", "بحث في الطلبات": "Search orders", "بدون اسم": "No name", "بدون طاولة": "No table", "بدون قاعدة توجيه": "No routing rule", "بريد الدعم": "Support email", "بنود محفوظة في الطلب": "Items saved in the order", "بوابة دفع سعودية للبطاقات ومدى.": "Saudi payment gateway for cards and Mada.", "بيانات الدخول غير صحيحة": "Login credentials are incorrect", "بيانات السائق": "Driver data", "بيانات المخزون تُقرأ من قاعدة البيانات مع عزل المطعم.": "Inventory data is read from the database with restaurant isolation.", "بيانات المطعم": "Restaurant data", "بيانات الموظفين محفوظة في قاعدة البيانات مع عزل المطعم.": "Staff data is stored in the database with restaurant isolation.", "تابع الطلبات الجديدة وإشغال الطاولات وتواصل مع فريق المطبخ.": "Track new orders, table occupancy, and communicate with the kitchen team.", "تابع الطلبات المخصصة لك وتحديثات مهام التوصيل.": "Follow orders assigned to you and delivery task updates.", "تابع الطلبات والفروع والعمليات اليومية من مساحة المطعم.": "Track orders, branches, and daily operations from the restaurant dashboard.", "تابع الطلبات وحدّث مراحلها من شاشة واحدة.": "Track orders and update their stages from one screen.", "تتبع الحملات الإعلانية.": "Track advertising campaigns.", "تجربة": "Trial", "تجريبي": "Experimental", "تجريبية": "Experimental", "تحتاج مراجعة": "Needs review", "تُحدد لاحقًا": "To be determined", "تحديث الحالة": "Update status", "تحديث كل 30 ثانية": "Update every 30 seconds", "تحليلات متقدمة": "Advanced analytics", "تسجيل الدخول عبر Google.": "Sign in with Google.", "تسجيل دخول بدون كلمة مرور.": "Passwordless sign-in.", "تسليمات مكتملة": "Completed deliveries", "تعديل الأولوية": "Edit priority", "تعديل القسم": "Edit section", "تعذر": "Failed", "تعذر إرسال طلب السائق": "Failed to send driver request", "تعذر إنشاء الإحالة": "Failed to create referral", "تعذر إنشاء الحساب": "Failed to create account", "تعذر التحميل": "Failed to load", "تعذر تبديل الحساب": "Failed to switch account", "تعذر تحديث القسم": "Failed to update section", "تعذر تحديث النقاط": "Failed to update points", "تعذر تحديث قاعدة التوجيه": "Failed to update routing rule", "تعذر تحميل الفروع": "Failed to load branches", "تعذر تحميل الكتالوج": "Failed to load catalog", "تعذر تحميل قائمة المطاعم الآن؛ يمكنك متابعة الدخول وإعادة المحاولة من محدد المطعم.": "Failed to load the restaurant list right now; you can continue signing in and retry from the restaurant selector.", "تعذر تسجيل الخروج": "Failed to log out", "تعذر حذف القسم": "Failed to delete section", "تعذر حذف قاعدة التوجيه": "Failed to delete routing rule", "تعذر حساب الجمهور الآن.": "Unable to calculate audience now.", "تعذر حفظ اشتراك الإشعارات": "Failed to save notification subscription", "تعذر حفظ القسم": "Failed to save section", "تعذر حفظ قاعدة التوجيه": "Failed to save routing rule", "تعذر رفع ملفات السائق": "Failed to upload driver files", "تعذر فحص الصحة": "Failed to perform health check", "تعذر قراءة الملف": "Failed to read file", "تعطيل Override": "Disable Override", "تعطيل القاعدة": "Disable rule", "تعمل": "Working", "تفعيل 2FA": "Enable 2FA", "تفعيل Override": "Enable Override", "تفعيل القاعدة": "Enable rule", "تقارير موسعة": "Extended reports", "تم إرسال طلب الانضمام للمطعم": "Restaurant join request sent", "تم إلغاء ارتباط العامل": "Worker unlinked", "تم إلغاء الاشتراك": "Unsubscribed", "تم إنشاء الاشتراك": "Subscription created", "تم إنشاء الحساب. احفظ كلمة المرور وأكمل تأكيد البريد لاحقًا.": "Account created. Save the password and complete email confirmation later.", "تم إنشاء الحملة": "Campaign created", "تم إنشاء الدور": "Role created", "تم إنشاء العميل": "Customer created", "تم إنشاء الكوبون": "Coupon created", "تم إنشاء المطعم": "Restaurant created", "تم إنشاء دور المطعم": "Restaurant role created", "تم إنشاء رمز الإحالة": "Referral code created", "تم استلام الطلب": "Order received", "تم استلام بياناتك. سيجري فريق NFOOD التحقق من المعلومات، وسيصل إشعار إلى بريدك عند الموافقة على انضمامك.": "Your data has been received. The NFOOD team will verify the information, and a notification will be sent to your email when your application is approved.", "تم التعيين": "Assigned", "تم الرجوع إلى لوحة النظرة العامة": "Returned to overview dashboard", "تم السماح بالإشعارات. يلزم ربط مفتاح Push للإرسال الإنتاجي.": "Notifications allowed. A Push key must be linked for production sending.", "تم بدء تثبيت تطبيق NFOOD": "NFOOD app installation started", "تم تثبيت تطبيق NFOOD": "NFOOD app installed", "تم تحديث الاشتراك": "Subscription updated", "تم تحديث التصنيف": "Classification updated", "تم تحديث الحالة": "Status updated", "تم تحديث الحملة": "Campaign updated", "تم تحديث الدور": "Role updated", "تم تحديث الشراء": "Purchase updated", "تم تحديث الصنف": "Item updated", "تم تحديث العامل": "Worker updated", "تم تحديث العميل": "Customer updated", "تم تحديث القسم": "Section updated", "تم تحديث الكمية": "Quantity updated", "تم تحديث الكوبون": "Coupon updated", "تم تحديث المطعم": "Restaurant updated", "تم تحديث الموظف": "Employee updated", "تم تحديث حالة التوصيل": "Delivery status updated", "تم تحديث حالة الطاولة": "Table status updated", "تم تحديث حالة الفرع": "Branch status updated", "تم تحديث دور المطعم": "Restaurant role updated", "تم تحديث طلب العامل": "Worker request updated", "تم تحديث قاعدة التوجيه": "Routing rule updated", "تم تحديث نقاط الولاء": "Loyalty points updated", "تم تسجيل الخروج": "Logged out", "تم تسجيل الخروج من جميع الأجهزة": "Logged out from all devices", "تم تسجيل الدخول لحساب الاختبار": "Logged in to test account", "تم تسجيل الشراء": "Purchase recorded", "تم تسجيل حضور اليوم": "Today's attendance recorded", "تم تعطيل 2FA": "2FA disabled", "تم تعليق المطعم": "Restaurant suspended", "تم تفعيل 2FA": "2FA enabled", "تم تفعيل إشعارات NFOOD وحفظ الجهاز": "NFOOD notifications enabled and device saved", "تم حذف التصنيف": "Category deleted", "تم حذف الحملة": "Campaign deleted", "تم حذف الدور": "Role deleted", "تم حذف الشراء": "Purchase deleted", "تم حذف الصنف": "Item deleted", "تم حذف الطاولة": "Table deleted", "تم حذف العميل": "Customer deleted", "تم حذف الفرع": "Branch deleted", "تم حذف القسم وقواعده": "Section and its rules deleted", "تم حذف الكوبون": "Coupon deleted", "تم حذف الموظف": "Employee deleted", "تم حذف دور المطعم": "Restaurant role deleted", "تم حذف قاعدة التوجيه": "Routing rule deleted", "تم حذف مادة المخزون": "Inventory item deleted", "تم حفظ إعداد البوابة بشكل مستقل": "Gateway setting saved separately", "تم حفظ إعداد الميزة للمطعم": "Feature setting saved for the restaurant", "تم حفظ الحجز": "Reservation saved", "تم حفظ الطلب محليًا وسيُرسل تلقائيًا عند عودة الاتصال": "Order saved locally and will be sent automatically when connection returns", "تم حفظ جدولة الحملة": "Campaign schedule saved", "تم حفظ حالة الطلب في قاعدة البيانات": "Order status saved to database", "تم حفظ صلاحيات الدور": "Role permissions saved", "تم حفظ قاعدة التوجيه": "Routing rule saved", "تم حفظ قسم المطبخ": "Kitchen section saved", "تم حفظ نطاق المطعم": "Restaurant scope saved", "تم حفظ هوية المطعم": "Restaurant identity saved", "تم ربط العامل بالمطعم": "Worker linked to restaurant", "تم فتح نقطة البيع": "POS opened", "تم قبول المهمة": "Task accepted", "تم نسخ باركود الحساب": "Account barcode copied", "تم نسخ رابط المطعم": "Restaurant link copied", "تم نشر المهمة وحفظ قيمتها": "Task published and its value saved", "تمارا": "Tamara", "تمت إضافة التصنيف": "Category added", "تمت إضافة الصنف إلى المنيو": "Item added to menu", "تمت إضافة الطاولة": "Table added", "تمت إضافة الفرع": "Branch added", "تمت إضافة الموظف": "Employee added", "تمت إضافة مادة المخزون": "Inventory item added", "تنبيهات الشحن والتوصيل.": "Shipping and delivery alerts.", "تنظيم الطلبات الواردة ومتابعة زمن التحضير لحظياً.": "Organize incoming orders and track preparation time in real time.", "جارٍ إرسال الحجز...": "Sending reservation...", "جارٍ إرسال الطلب...": "Sending order...", "جارٍ إنشاء الطلب...": "Creating order...", "جارٍ الإرسال...": "Sending...", "جارٍ التحقق": "Verifying", "جارٍ التحقق من ارتباط حسابك...": "Verifying your account link...", "جارٍ التحقق...": "Verifying...", "جارٍ التحميل": "Loading", "جارٍ الربط...": "Linking...", "جارٍ الفحص": "Checking", "جارٍ الفحص...": "Checking...", "جارٍ النشر...": "Publishing...", "جارٍ تحميل": "Downloading", "جارٍ تحميل الحساب": "Loading account", "جارٍ تحميل الكتالوج": "Loading catalog", "جارٍ تحميل سجل الحضور...": "Loading attendance log...", "جارٍ حساب الجمهور...": "Calculating audience...", "جارٍ حساب العملاء": "Calculating customers", "جارٍ حفظ إعدادات الموقع...": "Saving site settings...", "جارٍ حفظ الطلب...": "Saving order...", "جارٍ رفع الملفات...": "Uploading files...", "جارٍ فحص الخدمات...": "Checking services...", "جارٍ...": "Processing...", "جاهز للتسليم": "Ready for delivery", "جدول Cron للحملة": "Campaign Cron schedule", "جلس": "Seated", "جهاز غير معروف": "Unknown device", "حالة الطاولات محفوظة في قاعدة البيانات مع عزل المطعم.": "Table states are saved in the database with restaurant isolation.", "حجز": "Reservation", "حد الاستخدام": "Usage limit", "حساب NFOOD": "NFOOD account", "حسابات التواصل": "Social accounts", "حفظ إعداد البوابة": "Save gateway settings", "حفظ إعدادات الموقع والسياسات": "Save site settings and policies", "حفظ التحديث": "Save update", "حفظ الحملة": "Save campaign", "حفظ الربط": "Save integration", "حفظ الشراء": "Save purchase", "حفظ الصلاحيات": "Save permissions", "حفظ الطاولة": "Save table", "حفظ الفرع": "Save branch", "حفظ الكوبون": "Save coupon", "حفظ المادة": "Save item", "حفظ الموظف": "Save employee", "حفظ الهوية": "Save ID", "حفظ تعديل الكوبون": "Save coupon edit", "حفظ صلاحيات الدور": "Save role permissions", "حلول الدفع للمنطقة العربية.": "Payment solutions for the Arab region.", "حماية النماذج من الاستخدام الآلي.": "Protect forms from automated use.", "حملات وولاء": "Loyalty campaigns", "دعم مخصص": "Dedicated support", "ذهبي Gold": "Gold", "راجع الطلبات والفروع والعمليات اليومية من مساحة المطعم.": "Review orders, branches, and daily operations from the restaurant dashboard.", "راجع طلبات العاملين قبل ربطهم بالمطعم.": "Review staff requests before linking them to the restaurant.", "راقب حالة API وقاعدة البيانات والخدمات الأساسية.": "Monitor API status, database, and core services.", "رخصة القيادة": "Driver's license", "رسائل SMS للمنطقة.": "SMS messages for the region.", "رسائل واتساب للعملاء.": "WhatsApp messages for customers.", "رسالة مختصرة للمطعم": "Short message to the restaurant", "رقم الطاولة (اختياري)": "Table number (optional)", "رقم العميل في النظام": "Customer number in the system", "رقم الفرع": "Branch number", "رقم الفرع اختياري": "Branch number (optional)", "رقم المطعم": "Restaurant number", "رقم المطعم، فارغ لدور المنصة": "Restaurant number, leave empty for platform role", "رمز الإحالة": "Referral code", "رمز الكوبون": "Coupon code", "ساعات العمل غير محددة": "Working hours not specified", "شاشة الطلبات · NFOOD": "Orders screen · NFOOD", "شبكة": "Network", "شعار المطعم": "Restaurant logo", "صباح الخير، فريق NFOOD": "Good morning, NFOOD team", "صلاحيات متقدمة": "Advanced permissions", "صنف متاح ضمن قائمة المطعم.": "Item available on the restaurant menu.", "صورة الهوية": "ID photo", "ضمن الباقة": "Included in the package", "طاولات بها طلبات": "Tables with orders", "طلبات QR": "QR orders", "طلبات بانتظار الدفع": "Orders awaiting payment", "طلبات تحتاج متابعة": "Orders needing follow-up", "طلبات تنتظر الخدمة": "Orders waiting for service", "طلبات جاهزة": "Ready orders", "طلبات جديدة": "New orders", "طلبات مخصصة": "Custom orders", "طلبات مكتملة": "Completed orders", "طلبك قيد التحقق": "Your request is under review", "عاجل": "Urgent", "عامة": "Public", "عدد الأشخاص": "Number of people", "عدد الضيوف يجب أن يكون بين 1 و50": "Number of guests must be between 1 and 50", "عدد المقاعد": "Number of seats", "عرض إشغال الطاولات وربطها بالطلبات الحالية.": "Show table occupancy and link to current orders.", "عرض الطاولات": "Table view", "عرض الطلبات": "Order view", "عميل نُفود": "NFOOD customer", "عنوان الطابعة": "Printer address", "عنوان الطابعة أو IP — اختياري": "Printer address or IP — optional", "غير متاح": "Unavailable", "غير متاحة": "Unavailable", "غير محدد": "Not specified", "غير محددة": "Not specified", "غير محدود": "Unlimited", "غير مدفوع": "Unpaid", "غير معروف": "Unknown", "غير معيّن": "Unassigned", "غير مفعّلة": "Disabled", "غير نشط": "Inactive", "فتح KDS": "Open KDS", "فتح POS": "Open POS", "فتح إدارة المنصة": "Open platform management", "فتح الإشعارات": "Open notifications", "فتح البحث العام": "Open global search", "فتح الطلبات": "Open orders", "فتح المنيو": "Open menu", "فتح قائمة الملف الشخصي": "Open profile menu", "فرع رئيسي": "Main branch", "فروع إضافية": "Additional branches", "فشل": "Failed", "فضي Silver": "Silver", "قائمة انتظار": "Queue", "قبول المدفوعات الإلكترونية.": "Accept electronic payments.", "قدّم طلبًا للعمل عن بُعد وتابع حالته.": "Apply for a remote job and track its status.", "قياس الحركة والنشاط.": "Measure traffic and activity.", "قياسي Standard": "Standard", "قيد التوصيل": "Out for delivery", "قيد المتابعة": "Under review", "كجم": "kg", "لإطلاق مطعمك وتجربة الأساسيات": "To launch your restaurant and try the basics", "لا توجد": "None", "لا توجد تذكرة جاهزة للطباعة": "No tickets ready to print", "لا توجد فروع مفتوحة": "No branches are open", "لا توجد مشتريات": "No purchases", "لا يوجد فرع مرتبط": "No linked branch", "لا يوجد فرع مرتبط لاستقبال الطلب": "No branch linked to receive the order", "لغة الموقع": "Site language", "للشركات وسلاسل المطاعم": "For companies and restaurant chains", "للمطاعم الصغيرة والفرق الناشئة": "For small restaurants and emerging teams", "للمطاعم النشطة ومتعددة القنوات": "For active, omnichannel restaurants", "لم يتم تسجيل الدخول": "Not logged in", "لم يتم تفعيل الإشعارات": "Notifications not enabled", "لم يتم قبول طلب انضمامك لهذا المطعم بعد.": "Your request to join this restaurant has not been accepted yet.", "لم يحضر": "No-show", "لم يرد العميل، عنوان غير صحيح...": "Customer didn't answer, incorrect address...", "لم يسجل الدخول": "Not signed in", "لوحة Super Admin · إدارة المنصة": "Super Admin Dashboard · Platform management", "لوحة التحكم": "Dashboard", "لوحة التوصيل · تابع مهامك الحالية": "Delivery Dashboard · Track your current tasks", "لوحة الكاشير · راقب المدفوعات والطلبات": "Cashier Dashboard · Monitor payments and orders", "لوحة المطبخ · الطلبات بانتظار التنفيذ": "Kitchen Dashboard · Orders pending", "لوحة النادل · جاهز لخدمة الضيوف": "Waiter Dashboard · Ready to serve guests", "مؤكد": "Confirmed", "متأخرة": "Delayed", "متابع طلبات": "Order tracking", "متابعة الطلبات": "Track orders", "متابعة المواد الخام والتنبيهات وتسجيل المشتريات.": "Track raw materials, alerts, and record purchases.", "متاح": "Available", "متاحة": "Available", "متوسط التحصيل": "Average collection", "متوسط دورة الطلب": "Average order cycle", "مثال: الوصول من البوابة الخلفية": "Example: access via the back gate", "مثال: متابعة رسائل Instagram": "Example: monitor Instagram messages", "مثل: TAMARA_API_KEY_PROD": "e.g.: TAMARA_API_KEY_PROD", "مجانية": "Free", "محجوزة": "Reserved", "محدّثة": "Updated", "مخصص": "Custom", "مدفوعات إفريقيا والشرق الأوسط.": "Africa & Middle East payments.", "مدفوعات إفريقيا.": "Africa payments.", "مدفوعات اليوم": "Today's payments", "مدفوعات عالمية.": "Global payments.", "مراجعة الطلبات": "Order review", "مرتجعات معلقة": "Pending returns", "مرجع المفتاح أو اسم السر": "Key reference or secret name", "مرحباً بك في NFOOD": "Welcome to NFOOD", "مركز إدارة المطعم": "Restaurant management center", "مركز إدارة المنصة": "Platform management center", "مركز التوصيل": "Delivery center", "مركز العميل": "Customer center", "مركز الكاشير": "Cashier center", "مركز تشغيل المطبخ": "Kitchen operations center", "مركز خدمة الطاولات": "Table service center", "مستعدون للانطلاق": "Ready to launch", "مستقبلي": "Upcoming", "مستقر": "Stable", "مشغولة": "Busy", "مطعمك": "Your restaurant", "معرّف المستخدم": "User ID", "معلّق": "Pending", "مغلق": "Closed", "مفتوح": "Open", "مقبولة": "Accepted", "ملاحظات اختيارية": "Optional notes", "ملاحظة اختيارية": "Optional note", "ملاحظة التسليم أو رابط النتيجة": "Delivery note or result link", "ملغاة": "Cancelled", "ملغاة آخر 30 يومًا": "Cancelled in the last 30 days", "ملغى": "Cancelled", "من backend فقط": "From backend only", "من البيانات الفعلية": "From actual data", "من بيانات المطعم": "From restaurant data", "منتهية": "Ended", "منشورة": "Published", "منيو رقمي": "Digital menu", "مهيأة": "Configured", "ميزة قادمة": "Upcoming feature", "ميسر": "Moyasar", "ميلاد": "Birthday", "ناجح": "Successful", "نسبة الضريبة يجب أن تكون بين 0 و100": "Tax rate must be between 0 and 100", "نسخ الباركود": "Copy barcode", "نشاط ومبيعات المنصة": "Platform activity and sales", "نشر المهمة": "Publish task", "نشط": "Active", "نشطة": "Active", "نطاق المنصة": "Platform scope", "نظام": "System", "نوع الحساب": "Account type", "هاتف": "Phone", "هاتف الدعم": "Support phone", "هايبر باي": "HyperPay", "هذه الإعدادات للمنصة المركزية ويمكن تعديلها وحفظها دفعة واحدة.": "These settings are for the central platform and can be edited and saved together.", "وسيلة الدفع": "Payment method", "وصف القاعدة (اختياري)": "Rule description (optional)", "وصف المطعم سيظهر هنا بعد الحفظ.": "The restaurant description will appear here after saving.", "وصف يظهر في صفحة المطعم": "Description shown on restaurant page", "يحتاج إعادة طلب": "Requires reorder", "يغلق HH:MM": "Closes HH:MM", "يفتح HH:MM": "Opens HH:MM", "يمكن للمنصة المركزية حفظ صفحات الشروط والخصوصية والاسترجاع، وتُعرض في جميع المسارات العامة حسب النطاق.": "The central platform can save the Terms, Privacy and Refund pages; they are displayed on all public routes according to scope.",
+    "مساحة واحدة لكل فريقك": "One space for your entire team", "آخر أحداث الدخول والتشغيل": "Latest sign-in and operations events", "القيمة بالريال السعودي": "Value in Saudi riyals", "بيانات حقيقية مجمعة لآخر 7 أيام، مع سجل النشاط الخاص بالنطاق المحدد.": "Real aggregated data for the last 7 days with activity for the selected scope.", "حركة المبيعات اليومية": "Daily sales movement", "أحداث النشاط": "Activity events", "النشاط والمبيعات": "Activity and sales", "طلبات نشطة": "Active orders", "كل الطلبات": "All orders", "مكتملة": "Completed", "أضف مطعمًا إلى المنصة": "Add a restaurant to the platform", "إضافة نشاط جديد": "Add a new business", "اسم المطعم": "Restaurant name", "الباقة": "Plan", "المعرّف العام": "Public identifier", "إغلاق": "Close", "حفظ المطعم": "Save restaurant", "مثال: مطعم نكهة": "Example: Flavour Restaurant", "إدارة التسليم": "Delivery management", "اختر طلبًا لإدارة حالته.": "Choose an order to manage its status.", "استلام الطلب": "Collect order", "تم الاستلام": "Collected", "تم التسليم": "Delivered", "في الطريق": "On the way", "مرتجع": "Returned", "فشل التوصيل": "Delivery failed", "لا توجد طلبات توصيل معينة لك": "No delivery orders assigned to you", "طلب #{order.id}": "Order #{order.id}", "بدون هاتف": "No phone", "عميل": "Customer", "ETA بالدقائق": "ETA in minutes", "سبب فشل التوصيل عند الحاجة": "Delivery failure reason if needed", "ملاحظة التسليم": "Delivery note", "مركز السائق والتوصيل": "Driver and delivery center", "طلباتي المعينة فقط، مع ETA وحالات الفشل والمرتجع.": "Only your assigned orders, with ETA, failure, and return statuses.", "الأقسام المحفوظة": "Saved sections", "قاعدة توجيه جديدة": "New routing rule", "قسم جديد": "New section", "أقسام المطبخ والطابعات": "Kitchen sections and printers", "اختر قسم المطبخ": "Choose kitchen section", "اسم الطابعة": "Printer name", "اسم القسم": "Section name", "الأولوية": "Priority", "بدون طابعة": "No printer", "طابعة شبكة": "Network printer", "غير موصل": "Disconnected", "متوقفة": "Stopped", "مفعّلة": "Enabled", "طباعة اختبارية": "Test print", "طباعة المتصفح": "Browser print", "حذف القسم": "Delete section", "حذف القاعدة": "Delete rule", "حفظ القسم والطابعة": "Save section and printer", "وصف قاعدة التوجيه": "Routing rule description", "تذاكر أقسام المطبخ": "Kitchen section tickets", "لا توجد طلبات مفتوحة لتقسيمها على أقسام المطبخ.": "No open orders to split across kitchen sections.", "اختر طلبًا لعرض الأصناف موزعة على القسم أو التصنيف المرتبط به.": "Choose an order to view items distributed by section or linked category.", "عيّن القسم من المنيو لتوجيه هذا الصنف.": "Assign a section from the menu to route this item.", "الولاء والإحالات": "Loyalty and referrals", "آخر معاملات النقاط": "Latest points transactions", "الإحالات": "Referrals", "التقييمات": "Reviews", "تقييمات منفصلة للمطعم والسائق والمنتج. تحليل المشاعر غير مفعل.": "Separate restaurant, driver, and product reviews. Sentiment analysis is disabled.", "لا توجد تقييمات محفوظة بعد.": "No reviews saved yet.", "شاشة استدعاء العملاء": "Customer call screen", "التحديث تلقائي": "Auto refresh", "جاهز للاستلام": "Ready for pickup", "رقم الطلب": "Order number", "نداء صوتي للطلب الجاهز": "Voice call for ready order", "تعذر تحميل شاشة الطلبات": "Unable to load order display", "ادخل إلى التشغيل الذي يفهم مطعمك.": "Enter operations that understand your restaurant.", "POS، المطبخ، الطلبات، العملاء والتحليلات في تجربة واحدة واضحة.": "POS, kitchen, orders, customers, and analytics in one clear experience.", "دخول موحد": "Unified sign-in", "اختر الحساب المناسب، وستظهر لك لوحتك وصلاحياتك تلقائيًا.": "Choose an account and your dashboard and permissions will appear automatically.", "أدخل بياناتك، وسنوجهك إلى مساحة العمل المناسبة.": "Enter your details and we will direct you to the right workspace.", "الأدمن": "Super Admin", "النادل": "Waiter", "الكاشير": "Cashier", "العميل": "Customer", "السائق": "Driver", "admin أو name@example.com": "admin or name@example.com", "أدخل كلمة المرور": "Enter your password", "جارٍ الدخول إلى مساحتك...": "Signing you into your workspace...", "دخول آمن": "Secure sign in", "أو": "or", "تسجيل الدخول موحد للأدمن والمطعم والفريق والعملاء والسائقين. يتم تحديد لوحة التحكم تلقائيًا حسب الدور.": "Sign-in is unified for admins, restaurants, teams, customers, and drivers. Your dashboard is selected automatically by role.", "نظرة عامة": "Overview", "الفروع والإعدادات": "Branches & settings", "الطلبات": "Orders", "نقطة البيع POS": "POS", "شاشة المطبخ KDS": "Kitchen display", "المنيو والأصناف": "Menu & items", "الطاولات": "Tables", "المخزون والمشتريات": "Inventory & purchases", "الموظفون والحضور": "Team & attendance", "التسويق والحملات": "Marketing & campaigns", "الحجوزات والانتظار": "Reservations & queue", "التوظيف عن بُعد": "Remote work", "أمان الحساب والجلسات": "Security & sessions", "صحة النظام": "System health", "جديد": "New", "قيد التحضير": "Preparing", "جاهز": "Ready", "مكتمل": "Completed", "قيد الانتظار": "Pending", "مقبول": "Approved", "مرفوض": "Rejected", "إلغاء": "Cancel", "حذف": "Delete", "تعديل": "Edit", "حفظ": "Save", "حفظ التعديل": "Save changes", "إضافة": "Add", "إضافة صنف": "Add item", "تصنيف جديد": "New category", "حفظ الصنف": "Save item", "حفظ التصنيف": "Save category", "إعادة المحاولة": "Retry", "جارٍ التحميل...": "Loading...", "جارٍ حفظ البيانات...": "Saving...", "جارٍ الحفظ...": "Saving...", "تعذر تحميل البيانات": "Unable to load data", "لا توجد بيانات محفوظة بعد.": "No saved data yet.", "لا توجد طلبات محفوظة لهذا الفرع بعد.": "No orders saved for this branch yet.", "لا توجد أصناف متاحة للبيع لهذا المطعم.": "No items are available for sale for this restaurant.", "لا توجد أصناف محفوظة لهذا المطعم بعد.": "No items saved for this restaurant yet.", "متوفر": "Available", "غير متوفر": "Unavailable", "داخل المطعم": "Dine in", "استلام": "Pickup", "توصيل": "Delivery", "متصل": "Online", "وضع عدم الاتصال": "Offline", "الأصناف المتاحة": "Available items", "سلة الطلب": "Order cart", "الإجمالي": "Total", "المجموع": "Total", "السعر": "Price", "الكمية": "Quantity", "الاسم": "Name", "البريد الإلكتروني": "Email", "رقم الجوال": "Phone", "رقم الهاتف": "Phone", "الدولة": "Country", "المدينة": "City", "الملاحظات": "Notes", "المطعم": "Restaurant", "الفروع": "Branches", "الفرع": "Branch", "العملاء": "Customers", "السائقون": "Drivers", "الموظفون": "Staff", "المطبخ": "Kitchen", "القائمة": "Menu", "الإشعارات": "Notifications", "لا توجد إشعارات": "No notifications", "تسجيل الخروج": "Sign out", "تبديل الحساب": "Switch account", "الإعدادات العامة": "General settings", "إدارة الباقة": "Manage plan", "تفعيل إشعارات NFOOD": "Enable NFOOD notifications", "تثبيت تطبيق NFOOD": "Install NFOOD app", "الاشتراك": "Subscription", "الطلبات اليوم": "Orders today", "مبيعات اليوم": "Sales today", "متوسط قيمة الطلب": "Average order value", "الطاولات المشغولة": "Occupied tables", "أداء المبيعات": "Sales performance", "حملات التسويق": "Marketing campaigns", "حملة جديدة": "New campaign", "إنشاء الحملة": "Create campaign", "الجمهور المتوقع": "Expected audience", "قيد المراجعة": "Under review", "قيد التنفيذ": "In progress", "تم الإرسال": "Sent", "تعذر تحميل الأصناف": "Unable to load items", "تعذر تحميل الطلبات": "Unable to load orders", "لا توجد حجوزات محفوظة بعد.": "No reservations saved yet.", "لا توجد مهام محفوظة بعد.": "No saved tasks yet.", "لا توجد حسابات مرتبطة بعد.": "No linked accounts yet.", "نعم": "Yes", "لا": "No", "تأكيد؟": "Confirm?", "طلب جديد": "New order", "إرسال": "Send", "تتبع": "Track", "إعادة الطلب": "Reorder", "طباعة": "Print", "الموقع": "Website", "اتصال": "Call", "واتساب": "WhatsApp", "احجز طاولتك": "Book a table", "إرسال طلب الحجز": "Send reservation request", "تأكيد الطلب والدفع نقدًا": "Confirm order and pay cash", "طباعة الباركود": "Print barcode", "امسح الكود لفتح المنيو": "Scan to open the menu", "باركود المنيو": "Menu QR code", "ساعات العمل والتواصل": "Opening hours & contact", "تتبع طلب الضيف": "Track guest order", "سلة الضيف": "Guest cart", "تسجيل الدخول": "Sign in", "كلمة المرور": "Password", "إنشاء الحساب": "Create account", "تابع عبر Google / OAuth": "Continue with Google / OAuth", "انضم إلى NFOOD كمطعم شريك": "Join NFOOD as a restaurant partner", "البيانات المطلوبة": "Required information", "المستندات والصور": "Documents & photos", "اختر الباقة": "Choose a plan", "لا يوجد دفع الآن.": "No payment is required now.", "بدون رسالة": "No message", "صحة المنصة": "Platform health"
+  },
+  fr: {
+    "· جارٍ التحديث": "· Mise à jour en cours", "+100 أو -50 نقطة": "+100 ou -50 points", "0 د": "0 min", "12,840 ر.س": "12 840 SAR", "2FA مفعّل — تعطيل": "2FA activé — Désactiver", "56% إشغال": "56% d'occupation", "68.20 ر.س": "68,20 SAR", "69.03 ر.س": "69,03 SAR", "8,460 ر.س": "8 460 SAR", "Churn آخر 30 يومًا": "Churn - 30 derniers jours", "IP غير متاح": "IP non disponible", "POS وKDS": "POS et KDS", "SMS واتصالات متعددة الدول.": "SMS et appels multi-pays.", "أخرى": "Autre", "أدخل اسم العميل والموعد": "Entrez le nom du client et le rendez-vous", "أدخل رقم العميل لعرض الحساب": "Entrez le numéro du client pour afficher le compte", "أدخل رقم العميل ورمز إحالة من 3 أحرف على الأقل": "Entrez le numéro du client et un code de parrainage d'au moins 3 caractères", "أدخل رقم عميل ونقاطًا صحيحة غير صفرية": "Entrez le numéro du client et un nombre de points valide non nul", "أدخل رقم هاتف صالحًا": "Entrez un numéro de téléphone valide", "أدر الأجهزة والجلسات والتحقق بخطوتين.": "Gérez les appareils, les sessions et l'authentification à deux facteurs.", "أدر المطاعم والباقات والإعدادات المركزية دون وحدات تشغيل المطاعم.": "Gérez les restaurants, les forfaits et les paramètres centraux sans unités opérationnelles des restaurants.", "أرغب بالعمل عن بُعد": "Je souhaite travailler à distance", "أكمل البيانات المطلوبة بصيغة صحيحة": "Complétez les informations requises correctement", "أمان الحساب": "Sécurité du compte", "أنشئ طلباً جديداً بسرعة واربطه بالفرع والطاولة.": "Créez une nouvelle commande rapidement et liez-la à la succursale et à la table.", "أنشئ طلبًا جديدًا وتحقق من حالة الدفع والطلبات المكتملة.": "Créez une nouvelle commande et vérifiez le statut de paiement et les commandes terminées.", "أنشئ مهامًا مدفوعة وتواصل مع الموظفين من مكان واحد.": "Créez des tâches payantes et communiquez avec le personnel depuis un seul endroit.", "أيام الخمول": "Jours d'inactivité", "إجمالي الشراء": "Achat total", "إجمالي الطلبات": "Total des commandes", "إدارة التصنيفات والأصناف والأسعار والتوفر.": "Gérez les catégories, les articles, les prix et la disponibilité.", "إدارة الطاولات": "Gérer les tables", "إدارة الطلبات": "Gérer les commandes", "إدارة الفروع": "Gérer les succursales", "إدارة الفروع وساعات العمل وإعداداتها التشغيلية.": "Gérez les succursales, les heures de travail et les paramètres opérationnels.", "إدارة الفريق": "Gérer l'équipe", "إدارة الفريق والأدوار وسجل الحضور.": "Gérez l'équipe, les rôles et les registres de présence.", "إدارة المطاعم والعملاء والاشتراكات والصلاحيات.": "Gérez les restaurants, les clients, les abonnements et les autorisations.", "إدارة مواعيد الضيوف وحالات الوصول من مساحة المطعم.": "Gérez les rendez-vous des invités et les statuts d'arrivée depuis l'espace du restaurant.", "إرسال الطلب للمطبخ": "Envoyer la commande en cuisine", "إشعارات الأنظمة الخارجية.": "Notifications des systèmes externes", "إضافة طاولة": "Ajouter une table", "إضافة فرع": "Ajouter une succursale", "إضافة مادة": "Ajouter une matière", "إضافة موظف": "Ajouter un employé", "إعدادات الموقع والصفحة الأولى": "Paramètres du site et de la page d'accueil", "إنشاء الاشتراك": "Créer un abonnement", "إنشاء الدور": "Créer un rôle", "إنشاء العميل": "Créer un client", "إنشاء مهمة": "Créer une tâche", "ابدأ بالطلبات الجديدة ثم انقلها إلى التحضير والجاهزية.": "Commencez par les nouvelles commandes, puis déplacez-les en préparation et en état de préparation.", "اختر الفرع": "Sélectionnez la succursale", "اختر المطعم": "Sélectionnez le restaurant", "اختر قسم المطبخ أولاً": "Choisissez d'abord la section de la cuisine", "اختر موعدًا مستقبليًا صالحًا": "Choisissez un rendez-vous futur valide", "اختيار الفرع": "Choisir la succursale", "اختيار المطعم": "Choisir le restaurant", "اختيار لون الهوية": "Choisir la couleur de l'identité", "اذكر المطلوب، الحساب أو القناة، وطريقة التسليم...": "Indiquez la demande, le compte ou le canal, et le mode de livraison...", "استعرض طلباتك الأخيرة وأعد الطلب من المساحة الموحدة.": "Consultez vos commandes récentes et recommandez depuis l'espace unifié.", "اسم التصنيف": "Nom de la catégorie", "اسم الحملة": "Nom de la campagne", "اسم الدور": "Nom du rôle", "اسم الصنف": "Nom de l'article", "اسم الضيف": "Nom de l'invité", "اسم الطاولة": "Nom de la table", "اسم العميل": "Nom du client", "اسم الفرع": "Nom de la succursale", "اسم القسم: المطبخ الساخن": "Nom du service : cuisine chaude", "اسم المادة": "Nom de la matière", "اسم المطعم للعملاء": "Nom du restaurant (pour les clients)", "اسم المورد": "Nom du fournisseur", "اسم الموظف": "Nom de l'employé", "اسم الموقع": "Nom du site", "اسم قسم المطبخ": "Nom de la section de la cuisine", "اسمح بالنوافذ المنبثقة للطباعة": "Autoriser les fenêtres contextuelles pour l'impression", "اكتب اسم القسم أولاً": "Saisissez d'abord le nom de la section", "اكتب رسالة...": "Tapez un message...", "اكتب نطاق المنصة بصيغة https://nfood.io": "Saisissez le domaine de la plateforme au format https://nfood.io", "اكتشف أصنافنا المختارة والمحضرة بعناية.": "Découvrez nos plats sélectionnés et préparés avec soin.", "الآن": "Maintenant", "الإعدادات الافتراضية للمنصة قبل تخصيص المطعم.": "Paramètres par défaut de la plateforme avant personnalisation du restaurant.", "الاسم كما في الهوية": "Nom tel que sur la pièce d'identité", "البداية": "Début", "البريد الإلكتروني اختياري": "E-mail (optionnel)", "البيانات": "Données", "التحليلات": "Analytique", "التسويق": "Marketing", "التكاملات": "Intégrations", "الحجوزات": "Réservations", "الحجوزات وقائمة الانتظار": "Réservations et file d'attente", "الحد الأدنى": "Minimum", "الحد الافتراضي": "Limite par défaut", "الحماية": "Sécurité", "الحملات محفوظة في قاعدة البيانات مع عزل المطعم.": "Les campagnes sont enregistrées dans la base de données avec isolation par restaurant.", "الخرائط": "Cartes", "الخرائط والعناوين وحساب المسارات.": "Cartes, adresses et calcul d'itinéraires.", "الخصم %": "Remise %", "الدعم": "Assistance", "الدفع": "Paiement", "الدفع الآجل والتقسيط.": "Paiement différé et paiements échelonnés.", "الدفع نقدي عند الاستلام": "Paiement en espèces à la livraison", "الدور": "Rôle", "الدور المطلوب": "Rôle requis", "الرسائل": "Messages", "الرياض": "Riyad", "السعر الشهري": "Prix mensuel", "السعودية": "Arabie saoudite", "الصفحات القانونية": "Pages légales", "الضيوف": "Invités", "الطلب غير موجود في بيانات backend الحالية": "La commande n'existe pas dans les données backend actuelles", "الطلب مكتمل بالفعل": "La commande est déjà terminée", "الطلبات الجديدة": "Nouvelles commandes", "العروض والكوبونات والحملات في مكان واحد.": "Offres, coupons et campagnes au même endroit.", "العملة": "Devise", "العنوان والمزايا والعروض الخاصة بالمطعم": "Adresse, avantages et offres spéciales du restaurant", "العنوان والوصف والمزايا": "Adresse, description et avantages", "الفروع محفوظة في قاعدة البيانات مع عزل المطعم.": "Les succursales sont enregistrées dans la base de données avec isolation par restaurant.", "الكل": "Tous", "الكمية الحالية": "Quantité actuelle", "اللغات": "Langues", "اللغة والعملة والمنطقة": "Langue, devise et région", "المبيعات": "Ventes", "المتصفح الحالي لا يدعم إشعارات Push": "Le navigateur actuel ne prend pas en charge les notifications Push", "المخزون": "Stock", "المراجعة": "Révision", "المركبة من الأمام": "Avant du véhicule", "المركبة من الخلف": "Arrière du véhicule", "المركبة من اليسار": "Côté gauche du véhicule", "المركبة من اليمين": "Côté droit du véhicule", "المستندات أو الباقة": "Documents ou forfait", "المطاعم النشطة": "Restaurants actifs", "المنتج": "Produit", "المنصة": "Plateforme", "المنطقة الزمنية": "Fuseau horaire", "المهام عن بُعد": "Tâches à distance", "الهوية": "Identité", "الوحدة": "Unité", "اليوم": "Jour", "بانتظار المراجعة": "En attente de révision", "بانتظار النادل": "En attente du serveur", "بحث في الطلبات": "Rechercher dans les commandes", "بدون اسم": "Sans nom", "بدون طاولة": "Sans table", "بدون قاعدة توجيه": "Aucune règle de routage", "بريد الدعم": "E-mail du support", "بنود محفوظة في الطلب": "Articles enregistrés dans la commande", "بوابة دفع سعودية للبطاقات ومدى.": "Passerelle de paiement saoudienne pour cartes et Mada.", "بيانات الدخول غير صحيحة": "Identifiants incorrects", "بيانات السائق": "Données du conducteur", "بيانات المخزون تُقرأ من قاعدة البيانات مع عزل المطعم.": "Les données d'inventaire sont lues depuis la base de données avec isolation par restaurant.", "بيانات المطعم": "Données du restaurant", "بيانات الموظفين محفوظة في قاعدة البيانات مع عزل المطعم.": "Les données du personnel sont enregistrées dans la base de données avec isolation par restaurant.", "تابع الطلبات الجديدة وإشغال الطاولات وتواصل مع فريق المطبخ.": "Suivez les nouvelles commandes, l'occupation des tables et communiquez avec l'équipe de cuisine.", "تابع الطلبات المخصصة لك وتحديثات مهام التوصيل.": "Suivez les commandes qui vous sont attribuées et les mises à jour des tâches de livraison.", "تابع الطلبات والفروع والعمليات اليومية من مساحة المطعم.": "Suivez les commandes, les succursales et les opérations quotidiennes depuis le tableau de bord du restaurant.", "تابع الطلبات وحدّث مراحلها من شاشة واحدة.": "Suivez les commandes et mettez à jour leurs étapes depuis un seul écran.", "تتبع الحملات الإعلانية.": "Suivez les campagnes publicitaires.", "تجربة": "Essai", "تجريبي": "Expérimental", "تجريبية": "Expérimentale", "تحتاج مراجعة": "Nécessite une révision", "تُحدد لاحقًا": "À déterminer", "تحديث الحالة": "Mettre à jour le statut", "تحديث كل 30 ثانية": "Mise à jour toutes les 30 secondes", "تحليلات متقدمة": "Analyses avancées", "تسجيل الدخول عبر Google.": "Se connecter avec Google.", "تسجيل دخول بدون كلمة مرور.": "Connexion sans mot de passe.", "تسليمات مكتملة": "Livraisons terminées", "تعديل الأولوية": "Modifier la priorité", "تعديل القسم": "Modifier la section", "تعذر": "Échec", "تعذر إرسال طلب السائق": "Impossible d'envoyer la demande au livreur", "تعذر إنشاء الإحالة": "Impossible de créer le parrainage", "تعذر إنشاء الحساب": "Impossible de créer le compte", "تعذر التحميل": "Impossible de charger", "تعذر تبديل الحساب": "Impossible de changer de compte", "تعذر تحديث القسم": "Impossible de mettre à jour la section", "تعذر تحديث النقاط": "Impossible de mettre à jour les points", "تعذر تحديث قاعدة التوجيه": "Impossible de mettre à jour la règle de routage", "تعذر تحميل الفروع": "Impossible de charger les succursales", "تعذر تحميل الكتالوج": "Impossible de charger le catalogue", "تعذر تحميل قائمة المطاعم الآن؛ يمكنك متابعة الدخول وإعادة المحاولة من محدد المطعم.": "Impossible de charger la liste des restaurants pour le moment ; vous pouvez poursuivre la connexion et réessayer depuis le sélecteur de restaurant.", "تعذر تسجيل الخروج": "Impossible de se déconnecter", "تعذر حذف القسم": "Impossible de supprimer la section", "تعذر حذف قاعدة التوجيه": "Impossible de supprimer la règle de routage", "تعذر حساب الجمهور الآن.": "Impossible de calculer l'audience pour le moment.", "تعذر حفظ اشتراك الإشعارات": "Impossible d'enregistrer l'abonnement aux notifications", "تعذر حفظ القسم": "Impossible d'enregistrer la section", "تعذر حفظ قاعدة التوجيه": "Impossible d'enregistrer la règle de routage", "تعذر رفع ملفات السائق": "Impossible de téléverser les fichiers du livreur", "تعذر فحص الصحة": "Impossible d'effectuer la vérification d'état", "تعذر قراءة الملف": "Impossible de lire le fichier", "تعطيل Override": "Désactiver Override", "تعطيل القاعدة": "Désactiver la règle", "تعمل": "Fonctionne", "تفعيل 2FA": "Activer 2FA", "تفعيل Override": "Activer Override", "تفعيل القاعدة": "Activer la règle", "تقارير موسعة": "Rapports étendus", "تم إرسال طلب الانضمام للمطعم": "Demande d'adhésion au restaurant envoyée", "تم إلغاء ارتباط العامل": "Employé dissocié", "تم إلغاء الاشتراك": "Désabonné", "تم إنشاء الاشتراك": "Abonnement créé", "تم إنشاء الحساب. احفظ كلمة المرور وأكمل تأكيد البريد لاحقًا.": "Compte créé. Enregistrez le mot de passe et complétez la confirmation par e‑mail plus tard.", "تم إنشاء الحملة": "Campagne créée", "تم إنشاء الدور": "Rôle créé", "تم إنشاء العميل": "Client créé", "تم إنشاء الكوبون": "Coupon créé", "تم إنشاء المطعم": "Restaurant créé", "تم إنشاء دور المطعم": "Rôle du restaurant créé", "تم إنشاء رمز الإحالة": "Code de parrainage créé", "تم استلام الطلب": "Commande reçue", "تم استلام بياناتك. سيجري فريق NFOOD التحقق من المعلومات، وسيصل إشعار إلى بريدك عند الموافقة على انضمامك.": "Vos données ont été reçues. L'équipe NFOOD vérifiera les informations et une notification sera envoyée à votre e‑mail lorsque votre inscription sera approuvée.", "تم التعيين": "Assigné", "تم الرجوع إلى لوحة النظرة العامة": "Retour au tableau de bord général", "تم السماح بالإشعارات. يلزم ربط مفتاح Push للإرسال الإنتاجي.": "Notifications autorisées. Il est nécessaire de lier une clé Push pour l'envoi en production.", "تم بدء تثبيت تطبيق NFOOD": "Installation de l'application NFOOD commencée", "تم تثبيت تطبيق NFOOD": "Application NFOOD installée", "تم تحديث الاشتراك": "Abonnement mis à jour", "تم تحديث التصنيف": "Classification mise à jour", "تم تحديث الحالة": "Statut mis à jour", "تم تحديث الحملة": "Campagne mise à jour", "تم تحديث الدور": "Rôle mis à jour", "تم تحديث الشراء": "Achat mis à jour", "تم تحديث الصنف": "Article mis à jour", "تم تحديث العامل": "Employé mis à jour", "تم تحديث العميل": "Client mis à jour", "تم تحديث القسم": "Section mise à jour", "تم تحديث الكمية": "Quantité mise à jour", "تم تحديث الكوبون": "Coupon mis à jour", "تم تحديث المطعم": "Restaurant mis à jour", "تم تحديث الموظف": "Employé mis à jour", "تم تحديث حالة التوصيل": "Statut de livraison mis à jour", "تم تحديث حالة الطاولة": "Statut de la table mis à jour", "تم تحديث حالة الفرع": "Statut de la succursale mis à jour", "تم تحديث دور المطعم": "Rôle du restaurant mis à jour", "تم تحديث طلب العامل": "Demande de l'employé mise à jour", "تم تحديث قاعدة التوجيه": "Règle de routage mise à jour", "تم تحديث نقاط الولاء": "Points de fidélité mis à jour", "تم تسجيل الخروج": "Déconnecté", "تم تسجيل الخروج من جميع الأجهزة": "Déconnecté de tous les appareils", "تم تسجيل الدخول لحساب الاختبار": "Connecté au compte de test", "تم تسجيل الشراء": "Achat enregistré", "تم تسجيل حضور اليوم": "Présence d'aujourd'hui enregistrée", "تم تعطيل 2FA": "2FA désactivée", "تم تعليق المطعم": "Restaurant suspendu", "تم تفعيل 2FA": "2FA activée", "تم تفعيل إشعارات NFOOD وحفظ الجهاز": "Notifications NFOOD activées et appareil enregistré", "تم حذف التصنيف": "Catégorie supprimée", "تم حذف الحملة": "Campagne supprimée", "تم حذف الدور": "Rôle supprimé", "تم حذف الشراء": "Achat supprimé", "تم حذف الصنف": "Article supprimé", "تم حذف الطاولة": "Table supprimée", "تم حذف العميل": "Client supprimé", "تم حذف الفرع": "Succursale supprimée", "تم حذف القسم وقواعده": "Section et ses règles supprimées", "تم حذف الكوبون": "Coupon supprimé", "تم حذف الموظف": "Employé supprimé", "تم حذف دور المطعم": "Rôle du restaurant supprimé", "تم حذف قاعدة التوجيه": "Règle de routage supprimée", "تم حذف مادة المخزون": "Article d'inventaire supprimé", "تم حفظ إعداد البوابة بشكل مستقل": "Paramètre de passerelle enregistré séparément", "تم حفظ إعداد الميزة للمطعم": "Paramètre de fonctionnalité enregistré pour le restaurant", "تم حفظ الحجز": "Réservation enregistrée", "تم حفظ الطلب محليًا وسيُرسل تلقائيًا عند عودة الاتصال": "Commande enregistrée localement et sera envoyée automatiquement lorsque la connexion reviendra", "تم حفظ جدولة الحملة": "Programmation de la campagne enregistrée", "تم حفظ حالة الطلب في قاعدة البيانات": "Statut de la commande enregistré dans la base de données", "تم حفظ صلاحيات الدور": "Autorisations du rôle enregistrées", "تم حفظ قاعدة التوجيه": "Règle de routage enregistrée", "تم حفظ قسم المطبخ": "Section de cuisine enregistrée", "تم حفظ نطاق المطعم": "Périmètre du restaurant enregistré", "تم حفظ هوية المطعم": "Identité du restaurant enregistrée", "تم ربط العامل بالمطعم": "Employé lié au restaurant", "تم فتح نقطة البيع": "Point de vente ouvert", "تم قبول المهمة": "Tâche acceptée", "تم نسخ باركود الحساب": "Code-barres du compte copié", "تم نسخ رابط المطعم": "Lien du restaurant copié", "تم نشر المهمة وحفظ قيمتها": "Tâche publiée et sa valeur enregistrée", "تمارا": "Tamara", "تمت إضافة التصنيف": "Catégorie ajoutée", "تمت إضافة الصنف إلى المنيو": "Article ajouté au menu", "تمت إضافة الطاولة": "Table ajoutée", "تمت إضافة الفرع": "Succursale ajoutée", "تمت إضافة الموظف": "Employé ajouté", "تمت إضافة مادة المخزون": "Article d'inventaire ajouté", "تنبيهات الشحن والتوصيل.": "Alertes d'expédition et de livraison.", "تنظيم الطلبات الواردة ومتابعة زمن التحضير لحظياً.": "Organiser les commandes entrantes et suivre le temps de préparation en temps réel.", "جارٍ إرسال الحجز...": "Envoi de la réservation...", "جارٍ إرسال الطلب...": "Envoi de la commande...", "جارٍ إنشاء الطلب...": "Création de la commande...", "جارٍ الإرسال...": "Envoi...", "جارٍ التحقق": "Vérification", "جارٍ التحقق من ارتباط حسابك...": "Vérification de la liaison de votre compte...", "جارٍ التحقق...": "Vérification...", "جارٍ التحميل": "Chargement", "جارٍ الربط...": "Liaison...", "جارٍ الفحص": "Vérification", "جارٍ الفحص...": "Vérification...", "جارٍ النشر...": "Publication...", "جارٍ تحميل": "Téléchargement", "جارٍ تحميل الحساب": "Chargement du compte", "جارٍ تحميل الكتالوج": "Chargement du catalogue", "جارٍ تحميل سجل الحضور...": "Chargement du registre des présences...", "جارٍ حساب الجمهور...": "Calcul du public...", "جارٍ حساب العملاء": "Calcul des clients", "جارٍ حفظ إعدادات الموقع...": "Enregistrement des paramètres du site...", "جارٍ حفظ الطلب...": "Enregistrement de la commande...", "جارٍ رفع الملفات...": "Téléversement des fichiers...", "جارٍ فحص الخدمات...": "Vérification des services...", "جارٍ...": "En cours...", "جاهز للتسليم": "Prêt pour la livraison", "جدول Cron للحملة": "Planification Cron de la campagne", "جلس": "Assis", "جهاز غير معروف": "Appareil inconnu", "حالة الطاولات محفوظة في قاعدة البيانات مع عزل المطعم.": "L'état des tables est enregistré dans la base de données avec isolation par restaurant.", "حجز": "Réservation", "حد الاستخدام": "Limite d'utilisation", "حساب NFOOD": "Compte NFOOD", "حسابات التواصل": "Comptes sociaux", "حفظ إعداد البوابة": "Enregistrer les paramètres de la passerelle", "حفظ إعدادات الموقع والسياسات": "Enregistrer les paramètres du site et les politiques", "حفظ التحديث": "Enregistrer la mise à jour", "حفظ الحملة": "Enregistrer la campagne", "حفظ الربط": "Enregistrer l'intégration", "حفظ الشراء": "Enregistrer l'achat", "حفظ الصلاحيات": "Enregistrer les autorisations", "حفظ الطاولة": "Enregistrer la table", "حفظ الفرع": "Enregistrer la succursale", "حفظ الكوبون": "Enregistrer le coupon", "حفظ المادة": "Enregistrer l'article", "حفظ الموظف": "Enregistrer l'employé", "حفظ الهوية": "Enregistrer l'ID", "حفظ تعديل الكوبون": "Enregistrer la modification du coupon", "حفظ صلاحيات الدور": "Enregistrer les autorisations du rôle", "حلول الدفع للمنطقة العربية.": "Solutions de paiement pour la région arabe.", "حماية النماذج من الاستخدام الآلي.": "Protéger les formulaires contre l'utilisation automatisée.", "حملات وولاء": "Campagnes de fidélité", "دعم مخصص": "Support dédié", "ذهبي Gold": "Gold", "راجع الطلبات والفروع والعمليات اليومية من مساحة المطعم.": "Consultez les commandes, les succursales et les opérations quotidiennes depuis l'espace du restaurant.", "راجع طلبات العاملين قبل ربطهم بالمطعم.": "Vérifiez les demandes du personnel avant de les lier au restaurant.", "راقب حالة API وقاعدة البيانات والخدمات الأساسية.": "Surveillez l'état de l'API, de la base de données et des services essentiels.", "رخصة القيادة": "Permis de conduire", "رسائل SMS للمنطقة.": "Messages SMS pour la région.", "رسائل واتساب للعملاء.": "Messages WhatsApp pour les clients.", "رسالة مختصرة للمطعم": "Message bref au restaurant", "رقم الطاولة (اختياري)": "Numéro de la table (optionnel)", "رقم العميل في النظام": "Numéro du client dans le système", "رقم الفرع": "Numéro de la succursale", "رقم الفرع اختياري": "Numéro de la succursale (optionnel)", "رقم المطعم": "Numéro du restaurant", "رقم المطعم، فارغ لدور المنصة": "Numéro du restaurant, laisser vide pour le rôle de la plateforme", "رمز الإحالة": "Code de parrainage", "رمز الكوبون": "Code du coupon", "ساعات العمل غير محددة": "Horaires de travail non spécifiés", "شاشة الطلبات · NFOOD": "Écran des commandes · NFOOD", "شبكة": "Réseau", "شعار المطعم": "Logo du restaurant", "صباح الخير، فريق NFOOD": "Bonjour, équipe NFOOD", "صلاحيات متقدمة": "Autorisations avancées", "صنف متاح ضمن قائمة المطعم.": "Article disponible dans le menu du restaurant.", "صورة الهوية": "Photo d'identité", "ضمن الباقة": "Inclus dans le forfait", "طاولات بها طلبات": "Tables avec commandes", "طلبات QR": "Commandes QR", "طلبات بانتظار الدفع": "Commandes en attente de paiement", "طلبات تحتاج متابعة": "Commandes nécessitant un suivi", "طلبات تنتظر الخدمة": "Commandes en attente de service", "طلبات جاهزة": "Commandes prêtes", "طلبات جديدة": "Nouvelles commandes", "طلبات مخصصة": "Commandes personnalisées", "طلبات مكتملة": "Commandes terminées", "طلبك قيد التحقق": "Votre demande est en cours de vérification", "عاجل": "Urgent", "عامة": "Publique", "عدد الأشخاص": "Nombre de personnes", "عدد الضيوف يجب أن يكون بين 1 و50": "Le nombre d'invités doit être entre 1 et 50", "عدد المقاعد": "Nombre de places", "عرض إشغال الطاولات وربطها بالطلبات الحالية.": "Afficher l'occupation des tables et les lier aux commandes en cours.", "عرض الطاولات": "Vue des tables", "عرض الطلبات": "Vue des commandes", "عميل نُفود": "Client NFOOD", "عنوان الطابعة": "Adresse de l'imprimante", "عنوان الطابعة أو IP — اختياري": "Adresse de l'imprimante ou IP — optionnel", "غير متاح": "Indisponible", "غير متاحة": "Indisponible", "غير محدد": "Non spécifié", "غير محددة": "Non spécifiée", "غير محدود": "Illimité", "غير مدفوع": "Non payé", "غير معروف": "Inconnu", "غير معيّن": "Non affecté", "غير مفعّلة": "Désactivée", "غير نشط": "Inactif", "فتح KDS": "Ouvrir KDS", "فتح POS": "Ouvrir POS", "فتح إدارة المنصة": "Ouvrir la gestion de la plateforme", "فتح الإشعارات": "Ouvrir les notifications", "فتح البحث العام": "Ouvrir la recherche générale", "فتح الطلبات": "Ouvrir les commandes", "فتح المنيو": "Ouvrir le menu", "فتح قائمة الملف الشخصي": "Ouvrir le menu du profil", "فرع رئيسي": "Succursale principale", "فروع إضافية": "Succursales supplémentaires", "فشل": "Échoué", "فضي Silver": "Argent", "قائمة انتظار": "File d'attente", "قبول المدفوعات الإلكترونية.": "Accepter les paiements électroniques.", "قدّم طلبًا للعمل عن بُعد وتابع حالته.": "Postulez pour un poste à distance et suivez son statut.", "قياس الحركة والنشاط.": "Mesurer le trafic et l'activité.", "قياسي Standard": "Standard", "قيد التوصيل": "En cours de livraison", "قيد المتابعة": "En cours d'examen", "كجم": "kg", "لإطلاق مطعمك وتجربة الأساسيات": "Pour lancer votre restaurant et tester les éléments de base", "لا توجد": "Aucun", "لا توجد تذكرة جاهزة للطباعة": "Aucun ticket prêt à être imprimé", "لا توجد فروع مفتوحة": "Aucune succursale ouverte", "لا توجد مشتريات": "Aucun achat", "لا يوجد فرع مرتبط": "Aucune succursale liée", "لا يوجد فرع مرتبط لاستقبال الطلب": "Aucune succursale liée pour recevoir la commande", "لغة الموقع": "Langue du site", "للشركات وسلاسل المطاعم": "Pour les entreprises et les chaînes de restaurants", "للمطاعم الصغيرة والفرق الناشئة": "Pour les petits restaurants et équipes émergentes", "للمطاعم النشطة ومتعددة القنوات": "Pour les restaurants actifs et multicanaux", "لم يتم تسجيل الدخول": "Non connecté", "لم يتم تفعيل الإشعارات": "Notifications non activées", "لم يتم قبول طلب انضمامك لهذا المطعم بعد.": "Votre demande pour rejoindre ce restaurant n'a pas encore été acceptée.", "لم يحضر": "Absent", "لم يرد العميل، عنوان غير صحيح...": "Le client n'a pas répondu, adresse incorrecte...", "لم يسجل الدخول": "Non connecté", "لوحة Super Admin · إدارة المنصة": "Tableau Super Admin · Gestion de la plateforme", "لوحة التحكم": "Tableau de bord", "لوحة التوصيل · تابع مهامك الحالية": "Tableau de livraison · Suivez vos tâches en cours", "لوحة الكاشير · راقب المدفوعات والطلبات": "Tableau du caissier · Surveillez les paiements et les commandes", "لوحة المطبخ · الطلبات بانتظار التنفيذ": "Tableau de cuisine · Commandes en attente", "لوحة النادل · جاهز لخدمة الضيوف": "Tableau du serveur · Prêt à servir les clients", "مؤكد": "Confirmé", "متأخرة": "En retard", "متابع طلبات": "Suivi des commandes", "متابعة الطلبات": "Suivre les commandes", "متابعة المواد الخام والتنبيهات وتسجيل المشتريات.": "Suivre les matières premières, les alertes et enregistrer les achats.", "متاح": "Disponible", "متاحة": "Disponible", "متوسط التحصيل": "Encaissement moyen", "متوسط دورة الطلب": "Cycle moyen de commande", "مثال: الوصول من البوابة الخلفية": "Exemple : accès via la porte arrière", "مثال: متابعة رسائل Instagram": "Exemple : suivre les messages Instagram", "مثل: TAMARA_API_KEY_PROD": "Ex. : TAMARA_API_KEY_PROD", "مجانية": "Gratuite", "محجوزة": "Réservé", "محدّثة": "Mis à jour", "مخصص": "Personnalisé", "مدفوعات إفريقيا والشرق الأوسط.": "Paiements Afrique et Moyen-Orient.", "مدفوعات إفريقيا.": "Paiements Afrique.", "مدفوعات اليوم": "Paiements du jour", "مدفوعات عالمية.": "Paiements mondiaux.", "مراجعة الطلبات": "Revue des commandes", "مرتجعات معلقة": "Retours en attente", "مرجع المفتاح أو اسم السر": "Référence de clé ou nom secret", "مرحباً بك في NFOOD": "Bienvenue chez NFOOD", "مركز إدارة المطعم": "Centre de gestion du restaurant", "مركز إدارة المنصة": "Centre de gestion de la plateforme", "مركز التوصيل": "Centre de livraison", "مركز العميل": "Centre client", "مركز الكاشير": "Centre de caisse", "مركز تشغيل المطبخ": "Centre d'exploitation de la cuisine", "مركز خدمة الطاولات": "Centre du service aux tables", "مستعدون للانطلاق": "Prêts à démarrer", "مستقبلي": "À venir", "مستقر": "Stable", "مشغولة": "Occupée", "مطعمك": "Votre restaurant", "معرّف المستخدم": "Identifiant utilisateur", "معلّق": "En attente", "مغلق": "Fermé", "مفتوح": "Ouvert", "مقبولة": "Accepté", "ملاحظات اختيارية": "Notes optionnelles", "ملاحظة اختيارية": "Note optionnelle", "ملاحظة التسليم أو رابط النتيجة": "Note de livraison ou lien du résultat", "ملغاة": "Annulée", "ملغاة آخر 30 يومًا": "Annulée au cours des 30 derniers jours", "ملغى": "Annulé", "من backend فقط": "Uniquement depuis le backend", "من البيانات الفعلية": "Depuis les données réelles", "من بيانات المطعم": "Depuis les données du restaurant", "منتهية": "Terminée", "منشورة": "Publiée", "منيو رقمي": "Menu numérique", "مهيأة": "Configurée", "ميزة قادمة": "Fonctionnalité à venir", "ميسر": "Moyasar", "ميلاد": "Date de naissance", "ناجح": "Réussi", "نسبة الضريبة يجب أن تكون بين 0 و100": "Le taux de taxe doit être entre 0 et 100", "نسخ الباركود": "Copier le code-barres", "نشاط ومبيعات المنصة": "Activité et ventes de la plateforme", "نشر المهمة": "Publier la tâche", "نشط": "Actif", "نشطة": "Active", "نطاق المنصة": "Portée de la plateforme", "نظام": "Système", "نوع الحساب": "Type de compte", "هاتف": "Téléphone", "هاتف الدعم": "Téléphone du support", "هايبر باي": "HyperPay", "هذه الإعدادات للمنصة المركزية ويمكن تعديلها وحفظها دفعة واحدة.": "Ces paramètres concernent la plateforme centrale et peuvent être modifiés et enregistrés en une seule fois.", "وسيلة الدفع": "Moyen de paiement", "وصف القاعدة (اختياري)": "Description de la règle (optionnel)", "وصف المطعم سيظهر هنا بعد الحفظ.": "La description du restaurant apparaîtra ici après enregistrement.", "وصف يظهر في صفحة المطعم": "Description affichée sur la page du restaurant", "يحتاج إعادة طلب": "Nécessite une nouvelle commande", "يغلق HH:MM": "Ferme HH:MM", "يفتح HH:MM": "Ouvre HH:MM", "يمكن للمنصة المركزية حفظ صفحات الشروط والخصوصية والاسترجاع، وتُعرض في جميع المسارات العامة حسب النطاق.": "La plateforme centrale peut enregistrer les pages Conditions, Confidentialité et Remboursement ; elles sont affichées sur toutes les routes publiques selon la portée.",
+    "مساحة واحدة لكل فريقك": "Un espace pour toute votre équipe", "آخر أحداث الدخول والتشغيل": "Derniers événements de connexion et d’exploitation", "القيمة بالريال السعودي": "Valeur en riyals saoudiens", "بيانات حقيقية مجمعة لآخر 7 أيام، مع سجل النشاط الخاص بالنطاق المحدد.": "Données réelles agrégées sur 7 jours avec l’activité du périmètre choisi.", "حركة المبيعات اليومية": "Évolution quotidienne des ventes", "أحداث النشاط": "Événements d’activité", "النشاط والمبيعات": "Activité et ventes", "طلبات نشطة": "Commandes actives", "كل الطلبات": "Toutes les commandes", "مكتملة": "Terminées", "أضف مطعمًا إلى المنصة": "Ajouter un restaurant à la plateforme", "إضافة نشاط جديد": "Ajouter une nouvelle activité", "اسم المطعم": "Nom du restaurant", "الباقة": "Offre", "المعرّف العام": "Identifiant public", "إغلاق": "Fermer", "حفظ المطعم": "Enregistrer le restaurant", "مثال: مطعم نكهة": "Exemple : Restaurant Saveur", "إدارة التسليم": "Gestion des livraisons", "اختر طلبًا لإدارة حالته.": "Choisissez une commande pour gérer son statut.", "استلام الطلب": "Récupérer la commande", "تم الاستلام": "Récupérée", "تم التسليم": "Livrée", "في الطريق": "En route", "مرتجع": "Retournée", "فشل التوصيل": "Échec de livraison", "لا توجد طلبات توصيل معينة لك": "Aucune livraison ne vous est attribuée", "طلب #{order.id}": "Commande #{order.id}", "بدون هاتف": "Sans téléphone", "عميل": "Client", "ETA بالدقائق": "ETA en minutes", "سبب فشل التوصيل عند الحاجة": "Motif d’échec si nécessaire", "ملاحظة التسليم": "Note de livraison", "مركز السائق والتوصيل": "Centre livreur et livraison", "طلباتي المعينة فقط، مع ETA وحالات الفشل والمرتجع.": "Vos commandes attribuées avec ETA, échecs et retours.", "الأقسام المحفوظة": "Sections enregistrées", "قاعدة توجيه جديدة": "Nouvelle règle de routage", "قسم جديد": "Nouvelle section", "أقسام المطبخ والطابعات": "Sections cuisine et imprimantes", "اختر قسم المطبخ": "Choisir la section cuisine", "اسم الطابعة": "Nom de l’imprimante", "اسم القسم": "Nom de la section", "الأولوية": "Priorité", "بدون طابعة": "Sans imprimante", "طابعة شبكة": "Imprimante réseau", "غير موصل": "Déconnectée", "متوقفة": "Arrêtée", "مفعّلة": "Activée", "طباعة اختبارية": "Impression test", "طباعة المتصفح": "Impression navigateur", "حذف القسم": "Supprimer la section", "حذف القاعدة": "Supprimer la règle", "حفظ القسم والطابعة": "Enregistrer la section et l’imprimante", "وصف قاعدة التوجيه": "Description de la règle de routage", "تذاكر أقسام المطبخ": "Tickets des sections cuisine", "لا توجد طلبات مفتوحة لتقسيمها على أقسام المطبخ.": "Aucune commande ouverte à répartir.", "اختر طلبًا لعرض الأصناف موزعة على القسم أو التصنيف المرتبط به.": "Choisissez une commande pour voir les articles répartis.", "عيّن القسم من المنيو لتوجيه هذا الصنف.": "Attribuez une section depuis le menu pour router cet article.", "الولاء والإحالات": "Fidélité et parrainages", "آخر معاملات النقاط": "Dernières transactions de points", "الإحالات": "Parrainages", "التقييمات": "Avis", "تقييمات منفصلة للمطعم والسائق والمنتج. تحليل المشاعر غير مفعل.": "Avis séparés pour le restaurant, le livreur et le produit. Analyse des sentiments inactive.", "لا توجد تقييمات محفوظة بعد.": "Aucun avis enregistré.", "شاشة استدعاء العملاء": "Écran d’appel clients", "التحديث تلقائي": "Actualisation automatique", "جاهز للاستلام": "Prête à retirer", "رقم الطلب": "Numéro de commande", "نداء صوتي للطلب الجاهز": "Appel vocal de la commande prête", "تعذر تحميل شاشة الطلبات": "Impossible de charger l’écran des commandes", "ادخل إلى التشغيل الذي يفهم مطعمك.": "Accédez à une gestion qui comprend votre restaurant.", "POS، المطبخ، الطلبات، العملاء والتحليلات في تجربة واحدة واضحة.": "POS, cuisine, commandes, clients et analytique dans une expérience claire.", "دخول موحد": "Connexion unifiée", "اختر الحساب المناسب، وستظهر لك لوحتك وصلاحياتك تلقائيًا.": "Choisissez un compte pour afficher automatiquement votre espace et vos droits.", "أدخل بياناتك، وسنوجهك إلى مساحة العمل المناسبة.": "Saisissez vos informations pour accéder au bon espace.", "الأدمن": "Administrateur", "النادل": "Serveur", "الكاشير": "Caissier", "العميل": "Client", "السائق": "Livreur", "admin أو name@example.com": "admin ou name@example.com", "أدخل كلمة المرور": "Saisissez votre mot de passe", "جارٍ الدخول إلى مساحتك...": "Connexion à votre espace...", "دخول آمن": "Connexion sécurisée", "أو": "ou", "تسجيل الدخول موحد للأدمن والمطعم والفريق والعملاء والسائقين. يتم تحديد لوحة التحكم تلقائيًا حسب الدور.": "La connexion est unifiée pour les administrateurs, restaurants, équipes, clients et livreurs. L’espace est choisi selon le rôle.", "نظرة عامة": "Vue d’ensemble", "الفروع والإعدادات": "Succursales et réglages", "الطلبات": "Commandes", "نقطة البيع POS": "POS", "شاشة المطبخ KDS": "Écran cuisine", "المنيو والأصناف": "Menu et articles", "الطاولات": "Tables", "المخزون والمشتريات": "Stock et achats", "الموظفون والحضور": "Équipe et présence", "التسويق والحملات": "Marketing et campagnes", "الحجوزات والانتظار": "Réservations et file", "التوظيف عن بُعد": "Travail à distance", "أمان الحساب والجلسات": "Sécurité et sessions", "صحة النظام": "État du système", "جديد": "Nouveau", "قيد التحضير": "En préparation", "جاهز": "Prêt", "مكتمل": "Terminé", "قيد الانتظار": "En attente", "مقبول": "Accepté", "مرفوض": "Refusé", "إلغاء": "Annuler", "حذف": "Supprimer", "تعديل": "Modifier", "حفظ": "Enregistrer", "حفظ التعديل": "Enregistrer les modifications", "إضافة": "Ajouter", "إضافة صنف": "Ajouter un article", "تصنيف جديد": "Nouvelle catégorie", "حفظ الصنف": "Enregistrer l’article", "حفظ التصنيف": "Enregistrer la catégorie", "إعادة المحاولة": "Réessayer", "جارٍ التحميل...": "Chargement...", "جارٍ حفظ البيانات...": "Enregistrement des données...", "جارٍ الحفظ...": "Enregistrement...", "تعذر تحميل البيانات": "Impossible de charger les données", "لا توجد بيانات محفوظة بعد.": "Aucune donnée enregistrée.", "لا توجد طلبات محفوظة لهذا الفرع بعد.": "Aucune commande pour cette succursale.", "لا توجد أصناف متاحة للبيع لهذا المطعم.": "Aucun article disponible à la vente.", "لا توجد أصناف محفوظة لهذا المطعم بعد.": "Aucun article enregistré.", "متوفر": "Disponible", "غير متوفر": "Indisponible", "داخل المطعم": "Sur place", "استلام": "À emporter", "توصيل": "Livraison", "متصل": "En ligne", "وضع عدم الاتصال": "Hors ligne", "الأصناف المتاحة": "Articles disponibles", "سلة الطلب": "Panier de commande", "الإجمالي": "Total", "المجموع": "Total", "السعر": "Prix", "الكمية": "Quantité", "الاسم": "Nom", "البريد الإلكتروني": "E-mail", "رقم الجوال": "Téléphone", "رقم الهاتف": "Téléphone", "الدولة": "Pays", "المدينة": "Ville", "الملاحظات": "Notes", "المطعم": "Restaurant", "الفروع": "Succursales", "الفرع": "Succursale", "العملاء": "Clients", "السائقون": "Livreurs", "الموظفون": "Équipe", "المطبخ": "Cuisine", "القائمة": "Menu", "الإشعارات": "Notifications", "لا توجد إشعارات": "Aucune notification", "تسجيل الخروج": "Se déconnecter", "تبديل الحساب": "Changer de compte", "الإعدادات العامة": "Réglages généraux", "إدارة الباقة": "Gérer l’offre", "تفعيل إشعارات NFOOD": "Activer les notifications NFOOD", "تثبيت تطبيق NFOOD": "Installer l’application NFOOD", "الاشتراك": "Abonnement", "مبيعات اليوم": "Ventes du jour", "الطلبات اليوم": "Commandes du jour", "متوسط قيمة الطلب": "Valeur moyenne", "الطاولات المشغولة": "Tables occupées", "أداء المبيعات": "Performance des ventes", "حملات التسويق": "Campagnes marketing", "حملة جديدة": "Nouvelle campagne", "إنشاء الحملة": "Créer la campagne", "الجمهور المتوقع": "Audience prévue", "قيد المراجعة": "En révision", "قيد التنفيذ": "En cours", "تم الإرسال": "Envoyé", "تعذر تحميل الأصناف": "Impossible de charger les articles", "تعذر تحميل الطلبات": "Impossible de charger les commandes", "لا توجد حجوزات محفوظة بعد.": "Aucune réservation enregistrée.", "لا توجد مهام محفوظة بعد.": "Aucune tâche enregistrée.", "لا توجد حسابات مرتبطة بعد.": "Aucun compte lié.", "نعم": "Oui", "لا": "Non", "تأكيد؟": "Confirmer ?", "طلب جديد": "Nouvelle commande", "إرسال": "Envoyer", "تتبع": "Suivre", "إعادة الطلب": "Commander à nouveau", "طباعة": "Imprimer", "الموقع": "Site web", "اتصال": "Appeler", "واتساب": "WhatsApp", "احجز طاولتك": "Réserver une table", "إرسال طلب الحجز": "Envoyer la réservation", "تأكيد الطلب والدفع نقدًا": "Confirmer et payer en espèces", "طباعة الباركود": "Imprimer le QR", "امسح الكود لفتح المنيو": "Scannez pour ouvrir le menu", "باركود المنيو": "QR du menu", "ساعات العمل والتواصل": "Horaires et contact", "تتبع طلب الضيف": "Suivre la commande", "سلة الضيف": "Panier invité", "تسجيل الدخول": "Connexion", "كلمة المرور": "Mot de passe", "إنشاء الحساب": "Créer un compte", "تابع عبر Google / OAuth": "Continuer avec Google / OAuth", "انضم إلى NFOOD كمطعم شريك": "Rejoindre NFOOD comme restaurant partenaire", "البيانات المطلوبة": "Informations requises", "المستندات والصور": "Documents et photos", "اختر الباقة": "Choisir une offre", "لا يوجد دفع الآن.": "Aucun paiement maintenant.", "بدون رسالة": "Sans message", "صحة المنصة": "État de la plateforme"
+    },
+  ur: {},
+};
+const legacyNodeSources = new WeakMap<Text, string>();
+let legacyTranslationInProgress = false;
+let legacyTranslationScheduled = false;
+let legacyTranslationLanguage: Language = "en";
+const legacyTranslationRoots: Node[] = [];
+function scheduleLegacyUiTranslations(language: Language, root: Node = document) {
+  if (typeof window === "undefined") return;
+  legacyTranslationLanguage = language;
+  if (root === document) {
+    legacyTranslationRoots.length = 0;
+    legacyTranslationRoots.push(document);
+  } else if (!legacyTranslationRoots.includes(document) && !legacyTranslationRoots.includes(root)) {
+    legacyTranslationRoots.push(root);
+  }
+  if (legacyTranslationScheduled) return;
+  legacyTranslationScheduled = true;
+  window.requestAnimationFrame(() => {
+    legacyTranslationScheduled = false;
+    const roots = legacyTranslationRoots.splice(0);
+    if (roots.includes(document)) applyLegacyUiTranslations(legacyTranslationLanguage, document);
+    else roots.forEach((node) => applyLegacyUiTranslations(legacyTranslationLanguage, node));
+  });
+}
+
+export const modernUiTranslations: Partial<Record<Exclude<Language, "ar">, Record<string, string>>> = {
+  en: {
+    "مركز المطاعم": "Restaurant center",
+    "تخصيص QR والباركود": "QR & barcode customization",
+    "قائمة المطاعم": "Restaurant list",
+    "إدارة المطاعم المسجلة، الباقات، الحالة، والروابط العامة من شاشة واحدة.": "Manage registered restaurants, plans, status, and public links from one workspace.",
+    "إضافة مطعم جديد": "Add restaurant",
+    "تعديل باقة المطعم": "Edit restaurant plan",
+    "اختر الباقة التي ستصبح فعالة لهذا المطعم. التغيير يحفظ مباشرة في حساب المطعم.": "Choose the plan that will become active for this restaurant. Changes are saved immediately.",
+    "الباقة الجديدة": "New plan",
+    "لا توجد باقات نشطة": "No active plans",
+    "حفظ الباقة": "Save plan",
+    "مميزات المطعم الفعلية": "Actual restaurant features",
+    "غير محددة": "Not specified",
+    "مفعلة": "Enabled",
+    "غير مفعلة": "Disabled",
+    "إغلاق": "Close",
+    "بيانات دخول المطعم": "Restaurant login details",
+    "صورة الملف": "Profile image",
+    "صورة الغلاف": "Cover image",
+    "اضغط لاختيار صورة الملف": "Choose a profile image",
+    "اضغط لاختيار صورة الغلاف": "Choose a cover image",
+    "جارٍ رفع الصورة...": "Uploading image...",
+    "تم رفع صورة الملف": "Profile image uploaded",
+    "تم رفع صورة الغلاف": "Cover image uploaded",
+    "تطبيق Admin Web · متصل": "Admin Web · Online",
+    "تطبيق Admin Web · دون اتصال": "Admin Web · Offline",
+    "Admin Web مثبت": "Admin Web installed",
+    "تثبيت Admin Web": "Install Admin Web",
+    "مزامنة الآن": "Sync now",
+    "جاهز للمزامنة": "Ready to sync",
+    "سيُزامن عند عودة الاتصال": "Will sync when connection returns",
+    "لا توجد عمليات معلقة للمزامنة": "No pending sync operations",
+    "السلة فارغة": "Your cart is empty",
+    "متابعة لإكمال الطلب": "Continue to checkout",
+    "تعذر إرسال الطلب. Request ID: guest-checkout-": "Could not submit the order. Request ID: guest-checkout-",
+    "أدخل بيانات التواصل لتأكيد الطلب.": "Enter your contact details to confirm the order.",
+    "طلبك": "Your order",
+    "ملف العميل": "Customer profile",
+    "الصفحة العامة · vCard": "Public profile · vCard",
+    "أنشئ بطاقة تعريفية قابلة للمشاركة، منفصلة عن صفحات المطاعم.": "Create a shareable profile card, separate from restaurant pages.",
+    "عرض الصفحة": "View page",
+    "إغلاق المحرر": "Close editor",
+    "العودة للوحة": "Back to dashboard",
+    "البيانات الأساسية": "Basic information",
+    "تفعيل الملف العام": "Enable public profile",
+    "المعرّف العام": "Public slug",
+    "الاسم الظاهر": "Display name",
+    "المنصب أو المهنة": "Title or profession",
+    "نبذة تعريفية": "Bio",
+    "التواصل والروابط": "Contact and links",
+    "الخدمات": "Services",
+    "إضافة خدمة": "Add service",
+    "حذف": "Delete",
+    "حفظ وتحديث الصفحة العامة": "Save and update public profile",
+    "بطاقة vCard المادية": "Physical vCard",
+    "طلب البطاقة": "Order card",
+    "ربط البطاقة": "Bind card",
+    "نسخ": "Copy",
+    "مشاركة": "Share",
+    "مركز إعدادات المنصة والبوابات": "Platform settings and gateways",
+    "إعدادات الموقع والصفحة الأولى": "Site and homepage settings",
+    "حفظ إعدادات الموقع والسياسات": "Save site settings and policies",
+    "البوابات المعرّفة": "Configured gateways",
+    "حركة المنصة": "Platform activity",
+    "حالة البيانات": "Data status",
+    "متصل": "Online",
+    "دون اتصال": "Offline",
+    "إن لم يظهر زر التثبيت، استخدم قائمة المتصفح ثم اختر «تثبيت التطبيق».": "If the install button is unavailable, use the browser menu and choose Install app.",
+    "تعذر تحميل إعدادات المنصة. Request ID: platform-settings": "Could not load platform settings. Request ID: platform-settings",
+    "إعادة المحاولة": "Retry",
+    "إعدادات صورة الحساب": "Account image settings",
+    "حدّث صورة ملفك الشخصي لتظهر في الرأس، الجلسات، ولوحات التشغيل الخاصة بدورك.": "Update your profile image so it appears in the header, sessions, and role workspace.",
+    "الصورة الشخصية": "Profile photo",
+    "الحساب الحالي": "Current account",
+    "صورة واضحة لهوية الحساب": "A clear image for your account identity",
+    "الصيغ المقبولة PNG وJPG وWEBP، والحجم الأقصى 8 ميجابايت. تُرفع الصورة إلى مكتبة الحساب ثم تُحفظ تلقائيًا.": "Accepted formats are PNG, JPG, and WEBP, with an 8 MB limit. The image is uploaded to your account library and saved automatically.",
+    "اختر صورة الحساب": "Choose account image",
+    "اضغط هنا أو اسحب الصورة إلى هذه المساحة": "Click here or drag an image into this area",
+    "جارٍ رفع الصورة وحفظها...": "Uploading and saving image...",
+    "الصورة الحالية محفوظة وتظهر في الحساب": "The current image is saved and visible on the account",
+    "حذف صورة الحساب": "Remove account image",
+    "يمكنك تغيير الصورة في أي وقت. لا تُستخدم الصورة في صفحات المطاعم العامة إلا إذا حفظتها داخل إعدادات هوية المطعم.": "You can change the image at any time. It is not used on public restaurant pages unless saved in restaurant branding settings.",
+    "تم حفظ صورة الحساب وستظهر في جميع لوحات الموقع": "Account image saved and visible across all workspaces",
+    "سبب العطل التقني": "Technical cause",
+    "حدث عطل غير متوقع": "An unexpected error occurred",
+    "العودة للرئيسية": "Back to home"
+  },
+  fr: {
+    "مركز المطاعم": "Centre des restaurants",
+    "تخصيص QR والباركود": "Personnalisation QR et codes-barres",
+    "قائمة المطاعم": "Liste des restaurants",
+    "إدارة المطاعم المسجلة، الباقات، الحالة، والروابط العامة من شاشة واحدة.": "Gérez les restaurants, forfaits, statuts et liens publics depuis un seul espace.",
+    "إضافة مطعم جديد": "Ajouter un restaurant",
+    "تعديل باقة المطعم": "Modifier le forfait",
+    "الباقة الجديدة": "Nouveau forfait",
+    "لا توجد باقات نشطة": "Aucun forfait actif",
+    "حفظ الباقة": "Enregistrer le forfait",
+    "مميزات المطعم الفعلية": "Fonctionnalités réelles du restaurant",
+    "مفعلة": "Activée",
+    "غير مفعلة": "Désactivée",
+    "إغلاق": "Fermer",
+    "صورة الملف": "Photo de profil",
+    "صورة الغلاف": "Photo de couverture",
+    "اضغط لاختيار صورة الملف": "Choisir une photo de profil",
+    "اضغط لاختيار صورة الغلاف": "Choisir une photo de couverture",
+    "جارٍ رفع الصورة...": "Téléchargement...",
+    "تم رفع صورة الملف": "Photo de profil téléchargée",
+    "تم رفع صورة الغلاف": "Photo de couverture téléchargée",
+    "تثبيت Admin Web": "Installer Admin Web",
+    "مزامنة الآن": "Synchroniser",
+    "جاهز للمزامنة": "Prêt à synchroniser",
+    "سيُزامن عند عودة الاتصال": "Synchronisation au retour de la connexion",
+    "لا توجد عمليات معلقة للمزامنة": "Aucune opération en attente",
+    "السلة فارغة": "Votre panier est vide",
+    "متابعة لإكمال الطلب": "Continuer la validation",
+    "أدخل بيانات التواصل لتأكيد الطلب.": "Saisissez vos coordonnées pour confirmer la commande.",
+    "طلبك": "Votre commande",
+    "ملف العميل": "Profil client",
+    "الصفحة العامة · vCard": "Profil public · vCard",
+    "أنشئ بطاقة تعريفية قابلة للمشاركة، منفصلة عن صفحات المطاعم.": "Créez une carte de profil partageable, séparée des pages des restaurants.",
+    "عرض الصفحة": "Voir la page",
+    "إغلاق المحرر": "Fermer l’éditeur",
+    "العودة للوحة": "Retour au tableau de bord",
+    "البيانات الأساسية": "Informations de base",
+    "تفعيل الملف العام": "Activer le profil public",
+    "المعرّف العام": "Identifiant public",
+    "الاسم الظاهر": "Nom affiché",
+    "المنصب أو المهنة": "Titre ou profession",
+    "نبذة تعريفية": "Biographie",
+    "التواصل والروابط": "Contact et liens",
+    "الخدمات": "Services",
+    "إضافة خدمة": "Ajouter un service",
+    "حذف": "Supprimer",
+    "حفظ وتحديث الصفحة العامة": "Enregistrer et mettre à jour le profil",
+    "بطاقة vCard المادية": "Carte vCard physique",
+    "طلب البطاقة": "Commander la carte",
+    "ربط البطاقة": "Associer la carte",
+    "نسخ": "Copier",
+    "مشاركة": "Partager",
+    "مركز إعدادات المنصة والبوابات": "Paramètres de la plateforme et passerelles",
+    "إعدادات الموقع والصفحة الأولى": "Paramètres du site et de l’accueil",
+    "حفظ إعدادات الموقع والسياسات": "Enregistrer les paramètres du site et les politiques",
+    "البوابات المعرّفة": "Passerelles configurées",
+    "حركة المنصة": "Activité de la plateforme",
+    "حالة البيانات": "État des données",
+    "متصل": "En ligne",
+    "دون اتصال": "Hors ligne",
+    "إعادة المحاولة": "Réessayer",
+    "إعدادات صورة الحساب": "Paramètres de la photo du compte",
+    "حدّث صورة ملفك الشخصي لتظهر في الرأس، الجلسات، ولوحات التشغيل الخاصة بدورك.": "Mettez à jour votre photo pour l’afficher dans l’en-tête, les sessions et votre espace de travail.",
+    "الصورة الشخصية": "Photo de profil",
+    "الحساب الحالي": "Compte actuel",
+    "صورة واضحة لهوية الحساب": "Une image claire pour identifier le compte",
+    "اختر صورة الحساب": "Choisir la photo du compte",
+    "اضغط هنا أو اسحب الصورة إلى هذه المساحة": "Cliquez ici ou glissez une image dans cette zone",
+    "جارٍ رفع الصورة وحفظها...": "Téléchargement et enregistrement...",
+    "الصورة الحالية محفوظة وتظهر في الحساب": "La photo actuelle est enregistrée et visible sur le compte",
+    "حذف صورة الحساب": "Supprimer la photo du compte",
+    "تم حفظ صورة الحساب وستظهر في جميع لوحات الموقع": "Photo enregistrée et visible dans tous les espaces",
+    "سبب العطل التقني": "Cause technique",
+    "حدث عطل غير متوقع": "Une erreur inattendue s’est produite",
+    "العودة للرئيسية": "Retour à l’accueil"
+  },
+  ur: {
+    "مركز المطاعم": "ریستوران مرکز",
+    "قائمة المطاعم": "ریستوران فہرست",
+    "إضافة مطعم جديد": "ریستوران شامل کریں",
+    "تعديل باقة المطعم": "ریستوران پیکیج تبدیل کریں",
+    "حفظ الباقة": "پیکیج محفوظ کریں",
+    "مميزات المطعم الفعلية": "ریستوران کی فعال خصوصیات",
+    "مفعلة": "فعال",
+    "غير مفعلة": "غیر فعال",
+    "إغلاق": "بند کریں",
+    "صورة الملف": "پروفائل تصویر",
+    "صورة الغلاف": "کور تصویر",
+    "اضغط لاختيار صورة الملف": "پروفائل تصویر منتخب کریں",
+    "اضغط لاختيار صورة الغلاف": "کور تصویر منتخب کریں",
+    "جارٍ رفع الصورة...": "تصویر اپ لوڈ ہو رہی ہے...",
+    "تم رفع صورة الملف": "پروفائل تصویر اپ لوڈ ہو گئی",
+    "تم رفع صورة الغلاف": "کور تصویر اپ لوڈ ہو گئی",
+    "تثبيت Admin Web": "Admin Web انسٹال کریں",
+    "مزامنة الآن": "ابھی سنک کریں",
+    "جاهز للمزامنة": "سنک کے لیے تیار",
+    "سيُزامن عند عودة الاتصال": "کنکشن واپس آنے پر سنک ہوگا",
+    "لا توجد عمليات معلقة للمزامنة": "سنک کے لیے کوئی زیر التوا عمل نہیں",
+    "السلة فارغة": "آپ کی کارٹ خالی ہے",
+    "متابعة لإكمال الطلب": "آرڈر مکمل کریں",
+    "أدخل بيانات التواصل لتأكيد الطلب.": "آرڈر کی تصدیق کے لیے رابطے کی معلومات درج کریں۔",
+    "طلبك": "آپ کا آرڈر",
+    "ملف العميل": "کسٹمر پروفائل",
+    "الصفحة العامة · vCard": "عوامی پروفائل · vCard",
+    "عرض الصفحة": "صفحہ دیکھیں",
+    "إغلاق المحرر": "ایڈیٹر بند کریں",
+    "العودة للوحة": "ڈیش بورڈ پر واپس جائیں",
+    "البيانات الأساسية": "بنیادی معلومات",
+    "تفعيل الملف العام": "عوامی پروفائل فعال کریں",
+    "المعرّف العام": "عوامی شناخت",
+    "الاسم الظاهر": "ظاہر ہونے والا نام",
+    "المنصب أو المهنة": "عہدہ یا پیشہ",
+    "نبذة تعريفية": "تعارف",
+    "التواصل والروابط": "رابطہ اور لنکس",
+    "الخدمات": "خدمات",
+    "إضافة خدمة": "سروس شامل کریں",
+    "حذف": "حذف کریں",
+    "حفظ وتحديث الصفحة العامة": "عوامی پروفائل محفوظ اور اپ ڈیٹ کریں",
+    "بطاقة vCard المادية": "فزیکل vCard",
+    "طلب البطاقة": "کارڈ منگوائیں",
+    "ربط البطاقة": "کارڈ منسلک کریں",
+    "نسخ": "کاپی",
+    "مشاركة": "شیئر",
+    "مركز إعدادات المنصة والبوابات": "پلیٹ فارم اور گیٹ وے کی ترتیبات",
+    "إعدادات الموقع والصفحة الأولى": "سائٹ اور ہوم پیج کی ترتیبات",
+    "حفظ إعدادات الموقع والسياسات": "سائٹ کی ترتیبات محفوظ کریں",
+    "البوابات المعرّفة": "کنفیگر شدہ گیٹ وے",
+    "حركة المنصة": "پلیٹ فارم سرگرمی",
+    "حالة البيانات": "ڈیٹا کی حالت",
+    "متصل": "آن لائن",
+    "دون اتصال": "آف لائن",
+    "إعادة المحاولة": "دوبارہ کوشش کریں",
+    "إعدادات صورة الحساب": "اکاؤنٹ تصویر کی ترتیبات",
+    "الصورة الشخصية": "پروفائل تصویر",
+    "الحساب الحالي": "موجودہ اکاؤنٹ",
+    "صورة واضحة لهوية الحساب": "اکاؤنٹ کی واضح شناختی تصویر",
+    "اختر صورة الحساب": "اکاؤنٹ تصویر منتخب کریں",
+    "اضغط هنا أو اسحب الصورة إلى هذه المساحة": "یہاں کلک کریں یا تصویر اس جگہ کھینچیں",
+    "جارٍ رفع الصورة وحفظها...": "تصویر اپ لوڈ اور محفوظ ہو رہی ہے...",
+    "الصورة الحالية محفوظة وتظهر في الحساب": "موجودہ تصویر محفوظ ہے اور اکاؤنٹ میں دکھائی دیتی ہے",
+    "حذف صورة الحساب": "اکاؤنٹ تصویر حذف کریں",
+    "تم حفظ صورة الحساب وستظهر في جميع لوحات الموقع": "اکاؤنٹ تصویر محفوظ ہو گئی اور تمام ورک اسپیس میں دکھائی دے گی",
+    "سبب العطل التقني": "تکنیکی وجہ",
+    "حدث عطل غير متوقع": "غیر متوقع خرابی پیش آئی",
+    "العودة للرئيسية": "ہوم پر واپس جائیں"
+  }
+};
+const operationalFragmentTranslations: Partial<Record<Exclude<Language, "ar">, Record<string, string>>> = {
+  en: {
+    "جارٍ الحفظ": "Saving…",
+    "تم حفظ": "Saved",
+    "تعذر حفظ": "Failed to save",
+    "جارٍ التحميل": "Loading…",
+    "جارٍ التحقق": "Verifying…",
+    "جارٍ الإرسال": "Sending…",
+    "جارٍ رفع": "Uploading…",
+    "جارٍ التحديث": "Updating…",
+    "جارٍ المعالجة": "Processing…",
+    "تم تحديث": "Updated",
+    "تعذر تحديث": "Failed to update",
+    "تم إنشاء": "Created",
+    "تعذر إنشاء": "Failed to create",
+    "تم حذف": "Deleted",
+    "تعذر حذف": "Failed to delete",
+    "تم نسخ": "Copied",
+    "تم إرسال": "Sent",
+    "تعذر إرسال": "Failed to send",
+    "تم رفع": "Uploaded",
+    "تعذر رفع": "Failed to upload",
+    "تم إلغاء": "Cancelled",
+    "تم ربط": "Linked",
+    "تعذر ربط": "Failed to link",
+    "تم تسجيل": "Registered",
+    "تعذر تسجيل": "Failed to register",
+    "تمت إضافة": "Added",
+    "تعذر إضافة": "Failed to add",
+    "تم تجهيز": "Prepared",
+    "تعذر تجهيز": "Failed to prepare",
+    "تحتاج مراجعة": "Needs review",
+    "قيد المراجعة": "Under review",
+    "قيد الانتظار": "Pending",
+    "قيد التحضير": "Preparing",
+    "بانتظار المزامنة": "Awaiting sync",
+    "لا توجد": "There are no",
+    "لا يوجد": "There is no",
+    "لا يدعم": "Does not support",
+    "غير معروف": "Unknown",
+    "غير محدد": "Unspecified",
+    "غير محددة": "Unspecified",
+    "غير متاح": "Unavailable",
+    "غير مسجل": "Not registered",
+    "غير مفعل": "Not enabled",
+    "مفعّلة": "Enabled",
+    "مفعل": "Enabled",
+    "متاحة": "Available",
+    "محدد": "Selected",
+    "الحساب": "Account",
+    "كلمة المرور": "Password",
+    "رمز التحقق": "Verification code",
+    "رقم الطلب": "Order number",
+    "اسم العميل": "Customer name",
+    "اسم المطعم": "Restaurant name",
+    "البريد الإلكتروني": "Email",
+    "قاعدة البيانات": "Database",
+    "قاعدة التوجيه": "Routing rule",
+    "قسم المطبخ": "Kitchen section",
+    "حفظ التعديل": "Save edits",
+    "حفظ إعداد": "Save settings",
+    "حفظ إعدادات": "Save settings",
+    "تحديث حالة": "Update status",
+    "اختر صورة": "Choose image",
+    "رفع الصورة": "Upload image",
+    "إرسال الطلب": "Submit the order",
+    "إرسال طلب": "Submit order",
+    "تسجيل طلب": "Register order",
+    "إنشاء الحساب": "Create account",
+    "على الأقل": "at least",
+    "يجب ألا": "must not",
+    "يجب أن": "must",
+    "داخل المطعم": "inside the restaurant",
+    "شكراً لزيارتكم": "Thank you for visiting",
+    "إعادة المحاولة": "Retry",
+    "فتح الطلبات": "Open orders",
+    "عرض الطلبات": "View orders",
+    "تابع الطلبات": "Follow orders",
+    "في الطريق": "On the way",
+    "عن بُعد": "Remotely",
+    "أمان الحساب": "Account security",
+    "مركز تشغيل": "Operations center",
+    "المطعم": "Restaurant",
+    "الطلب": "The order",
+    "الطلبات": "Orders",
+    "طلب": "Order",
+    "العميل": "Customer",
+    "صورة": "Image",
+    "رقم": "Number",
+    "الدفع": "Payment",
+    "عرض": "View",
+    "تسجيل": "Register",
+    "الباقة": "Plan",
+    "فتح": "Open",
+    "الإيصال": "Receipt",
+    "أدخل": "Enter",
+    "مركز": "Center",
+    "رفع": "Upload",
+    "رابط": "Link",
+    "بيانات": "Data",
+    "التوصيل": "Delivery",
+    "الحجز": "Reservation",
+    "الفرع": "Branch",
+    "مع": "with",
+    "إدارة": "Management",
+    "المطبخ": "Kitchen",
+    "التحقق": "Verification",
+    "تفعيل": "Enable",
+    "الملف": "File",
+    "اليوم": "Today",
+    "قبل": "before",
+    "الآن": "now",
+    "الدور": "The role",
+    "رمز": "Code",
+    "الصنف": "Item",
+    "نشط": "Active",
+    "بعد": "after",
+    "شاشة": "Screen",
+    "السائق": "Driver",
+    "الطاولات": "Tables",
+    "الشاشة": "The screen",
+    "اختياري": "Optional",
+    "إعادة": "Re-",
+    "تأكيد": "Confirm",
+    "الرابط": "The link",
+    "الترجمة": "Translation",
+    "نسخ": "Copy",
+    "المحتوى": "Content",
+    "تشغيل": "Run",
+    "الفئة": "Category",
+    "ربط": "Link",
+    "معاينة": "Preview",
+    "المراجعة": "Review",
+    "القسم": "Section",
+    "مساحة": "Space",
+    "إعداد": "Settings",
+    "يجب": "must",
+    "جديد": "New",
+    "قسم": "Section",
+    "الهوية": "Identity",
+    "النظام": "System",
+    "الإرسال": "Sending",
+    "جاهز": "Ready",
+    "وصف": "Description",
+    "حسب": "by",
+    "لم": "did not",
+    "النادل": "Waiter",
+    "ترجمة": "Translation",
+    "وقت": "Time",
+    "تحتاج": "needs",
+    "للمراجعة": "for review",
+    "الفروع": "Branches",
+    "عن": "about",
+    "الطاولة": "The table",
+    "تحميل": "Download",
+    "هذا": "this",
+    "تجربة": "Experience",
+    "قالب": "Template",
+    "مثال": "Example",
+    "بدون": "without",
+    "تجهيز": "Preparation",
+    "ملف": "File",
+    "اختيار": "Choice",
+    "الميزة": "The feature",
+    "العرض": "The offer",
+    "الدعم": "Support",
+    "تعديل": "Edit",
+    "حتى": "until",
+    "التحويل": "Transfer",
+    "المفتاح": "The key",
+    "واحدة": "one",
+    "مرفوض": "Rejected",
+    "إيصال": "Receipt",
+    "أحرف": "characters",
+    "بانتظار": "awaiting",
+    "من": "from",
+    "في": "in",
+    "على": "on",
+    "إلى": "to",
+    "أو": "or",
+    "لا": "No",
+    "عند": "at",
+    "أخرى": "Other",
+    "الكل": "All",
+    "المنيو": "Menu",
+    "منيو": "Menu",
+    "العملاء": "Customers",
+    "المطاعم": "Restaurants",
+    "الإعدادات": "Settings",
+    "الحجوزات": "Reservations",
+    "اللغة": "Language",
+    "حالة": "Status",
+    "الإجمالي": "Total",
+    "الاسم": "Name",
+    "حفظ": "Save",
+    "إضافة": "Add",
+    "حذف": "Delete",
+    "إلغاء": "Cancel",
+    "إرسال": "Send",
+    "إنشاء": "Create",
+    "اختر": "Choose",
+    "اسم": "Name",
+    "البريد": "Email",
+    "البيانات": "Data",
+    "إغلاق": "Close",
+    "متاح": "Available",
+    "الدخول": "Sign in",
+    "تسجيل الدخول": "Sign in",
+    "بحث": "Search",
+    "إعدادات": "Settings",
+    "الرئيسية": "Home",
+    "المنصة": "Platform",
+    "الأمان": "Security",
+    "المساحة": "Space",
+    "تحديث": "Update",
+    "الإشعارات": "Notifications",
+    "الكاشير": "Cashier",
+    "المخزون": "Inventory",
+    "الموظفون": "Staff",
+    "الحضور": "Attendance",
+    "التسويق": "Marketing",
+    "الحملات": "Campaigns",
+    "المدفوعات": "Payments",
+    "البطاقات": "Cards",
+    "المفاتيح": "Keys",
+    "المحفظة": "Wallet",
+    "المكافآت": "Rewards",
+    "التفتيش": "Inspection",
+    "التقارير": "Reports",
+    "الاتجاهات": "Analytics",
+    "المبيعات": "Sales",
+    "شراء": "Purchase",
+    "الموافقة": "Approval",
+    "الموافقات": "Approvals",
+    "المشتريات": "Purchases",
+    "الشحن": "Shipping",
+    "المكتبة": "Library",
+    "الرصيد": "Balance",
+    "المحفوظ": "Saved",
+    "عميل": "Customer",
+    "مطعم": "Restaurant",
+    "فئات": "Categories",
+    "أصناف": "Items",
+    "أسعار": "Prices",
+    "التوفر": "Availability",
+    "ساعات العمل": "Working hours",
+    "الأيام": "Days",
+    "نقطة البيع": "POS",
+    "طباعة": "Print",
+    "الطابعة": "Printer",
+    "الشبكة": "Network",
+    "متصل": "Online",
+    "غير متصل": "Offline",
+    "مزامنة": "Sync",
+    "آخر مزامنة": "Last sync",
+    "تحت التجهيز": "Preparing",
+    "مسودة": "Draft",
+    "مجملة": "Scheduled",
+    "مكتمل": "Completed",
+    "مكتملة": "Completed",
+    "مؤكد": "Confirmed",
+    "ملغي": "Cancelled",
+    "مرتجع": "Returned",
+    "ينتظر": "Waiting",
+    "تم": "Done",
+    "تتمة": "Continue",
+    "التالي": "Next",
+    "السابق": "Previous",
+    "رجوع": "Back",
+    "موافقة": "Approve",
+    "إعتماد": "Approve",
+    "رفض": "Reject",
+    "نعم": "Yes",
+    "ربما": "Maybe",
+    "لا يمكن": "Cannot",
+    "لم نجد": "Not found",
+    "خطأ": "Error",
+    "نجاح": "Success",
+    "تم بنجاح": "Successfully",
+    "فشل": "Failed",
+    "تحذير": "Warning",
+    "ملاحظة": "Note",
+    "تنبيه": "Alert",
+    "مطلوب": "Required",
+    "سريع": "Quick",
+    "بسيط": "Simple",
+    "كبير": "Large",
+    "صغير": "Small",
+    "متوسط": "Medium",
+    "عالي": "High",
+    "منخفض": "Low",
+    "الأعلى": "Highest",
+    "الأدنى": "Lowest",
+    "الأكثر": "Most",
+    "الأقل": "Least",
+    "الحديثة": "Recent",
+    "السابقة": "Previous",
+    "التالية": "Next",
+    "الحالي": "Current",
+    "الجديد": "New",
+    "القديم": "Old",
+    "تغيير": "Change",
+    "إظهار": "Show",
+    "إخفاء": "Hide",
+    "تصدير": "Export",
+    "استيراد": "Import",
+    "استلام": "Receive",
+    "تسليم": "Deliver",
+    "التسليم": "Delivery",
+    "استلام الطلب": "Collect order",
+    "الاستلام": "Collection",
+    "الدفع نقداً": "Cash payment",
+    "البطاقة": "Card",
+    "النقاط": "Points",
+    "فروع": "branches",
+    "فرع": "branch",
+    "نسخة": "copy",
+    "ميزة": "feature",
+    "ميزات": "features",
+    "مميزة": "feature",
+    "متأخر": "Delayed",
+    "متأخرة": "Delayed",
+    "دقيقة": "min",
+    "د": "min",
+    "ثانية": "sec",
+    "ث": "sec",
+    "شهريًا": "monthly",
+    "لغات": "languages",
+    "النكهات": "flavors",
+    "بذكاء": "intelligently",
+    "النطاق": "range",
+    "نطاق": "range",
+    "الضريبة": "tax",
+    "ضريبة": "tax",
+    "الخصم": "discount",
+    "خصم": "discount",
+    "قبل الخصم": "before discount",
+    "التطبيق": "app",
+    "المتصفح": "browser",
+    "المشرف": "supervisor",
+    "ضيف": "guest",
+    "ضيوف": "guests",
+    "طفل": "child",
+    "أطفال": "children",
+    "سائق": "driver",
+    "سائقون": "drivers",
+    "مادة": "item",
+    "مواد": "items",
+    "نجوم": "stars",
+    "إشعارات": "notifications",
+    "عملية": "operation",
+    "عمليات": "operations",
+    "باقات": "plans",
+    "أدوار": "roles",
+    "صلاحية": "permission",
+    "صلاحيات": "permissions",
+    "محفوظ": "saved",
+    "محفوظة": "saved",
+    "غير مقروءة": "unread",
+    "مقروءة": "read",
+    "سوق": "market",
+    "الصور": "photos",
+    "المقاطع": "clips",
+    "لبيع": "to sell",
+    "بحقوقك": "with your rights",
+    "بالإنجليزية": "in English",
+    "التشغيل": "operations",
+    "العمليات": "operations",
+    "الأساسية": "core",
+    "الرموز": "codes",
+    "التكاملات": "integrations",
+    "التكامل": "integration",
+    "عبر": "via",
+    "الجهاز": "device",
+    "يعمل": "works",
+    "الاشتراك": "subscription",
+    "السعر": "price",
+    "الأسعار": "prices",
+    "بموقع صالح": "with a valid location",
+    "صالح": "valid",
+    "غائب": "absent",
+    "حاضر": "present"
+  },
+  fr: {
+    "جارٍ الحفظ": "Enregistrement…",
+    "تم حفظ": "Enregistré",
+    "تعذر حفظ": "Échec de l’enregistrement",
+    "جارٍ التحميل": "Chargement…",
+    "جارٍ التحقق": "Vérification…",
+    "جارٍ الإرسال": "Envoi en cours…",
+    "جارٍ رفع": "Téléversement…",
+    "جارٍ التحديث": "Mise à jour…",
+    "جارٍ المعالجة": "Traitement…",
+    "تم تحديث": "Mis à jour",
+    "تعذر تحديث": "Échec de la mise à jour",
+    "تم إنشاء": "Créé",
+    "تعذر إنشاء": "Échec de la création",
+    "تم حذف": "Supprimé",
+    "تعذر حذف": "Échec de la suppression",
+    "تم نسخ": "Copié",
+    "تم إرسال": "Envoyé",
+    "تعذر إرسال": "Échec de l’envoi",
+    "تم رفع": "Téléversé",
+    "تعذر رفع": "Échec du téléversement",
+    "تم إلغاء": "Annulé",
+    "تم ربط": "Lié",
+    "تعذر ربط": "Échec de la liaison",
+    "تم تسجيل": "Enregistré",
+    "تعذر تسجيل": "Échec de l’enregistrement",
+    "تمت إضافة": "Ajouté",
+    "تعذر إضافة": "Échec de l’ajout",
+    "تم تجهيز": "Préparé",
+    "تعذر تجهيز": "Échec de la préparation",
+    "تحتاج مراجعة": "Nécessite une révision",
+    "قيد المراجعة": "En cours de révision",
+    "قيد الانتظار": "En attente",
+    "قيد التحضير": "En préparation",
+    "بانتظار المزامنة": "En attente de synchronisation",
+    "لا توجد": "Il n’y a pas de",
+    "لا يوجد": "Il n’y a pas de",
+    "لا يدعم": "Ne prend pas en charge",
+    "غير معروف": "Inconnu",
+    "غير محدد": "Indéterminé",
+    "غير محددة": "Indéterminée",
+    "غير متاح": "Indisponible",
+    "غير مسجل": "Non enregistré",
+    "غير مفعل": "Non activé",
+    "مفعّلة": "Activée",
+    "مفعل": "Activé",
+    "متاحة": "Disponible",
+    "محدد": "Sélectionné",
+    "الحساب": "Compte",
+    "كلمة المرور": "Mot de passe",
+    "رمز التحقق": "Code de vérification",
+    "رقم الطلب": "Numéro de commande",
+    "اسم العميل": "Nom du client",
+    "اسم المطعم": "Nom du restaurant",
+    "البريد الإلكتروني": "E-mail",
+    "قاعدة البيانات": "Base de données",
+    "قاعدة التوجيه": "Règle de routage",
+    "قسم المطبخ": "Section cuisine",
+    "حفظ التعديل": "Enregistrer les modifications",
+    "حفظ إعداد": "Enregistrer les paramètres",
+    "حفظ إعدادات": "Enregistrer les paramètres",
+    "تحديث حالة": "Mettre à jour le statut",
+    "اختر صورة": "Choisir une image",
+    "رفع الصورة": "Téléverser l’image",
+    "إرسال الطلب": "Envoyer la commande",
+    "إرسال طلب": "Envoyer la commande",
+    "تسجيل طلب": "Enregistrer la commande",
+    "إنشاء الحساب": "Créer un compte",
+    "على الأقل": "au moins",
+    "يجب ألا": "ne doit pas",
+    "يجب أن": "doit",
+    "داخل المطعم": "dans le restaurant",
+    "شكراً لزيارتكم": "Merci de votre visite",
+    "إعادة المحاولة": "Réessayer",
+    "فتح الطلبات": "Ouvrir les commandes",
+    "عرض الطلبات": "Vue des commandes",
+    "تابع الطلبات": "Suivre les commandes",
+    "في الطريق": "En route",
+    "عن بُعد": "À distance",
+    "أمان الحساب": "Sécurité du compte",
+    "مركز تشغيل": "Centre des opérations",
+    "المطعم": "Restaurant",
+    "الطلب": "La commande",
+    "الطلبات": "Commandes",
+    "طلب": "Commande",
+    "العميل": "Client",
+    "صورة": "Image",
+    "رقم": "Numéro",
+    "الدفع": "Paiement",
+    "عرض": "Afficher",
+    "تسجيل": "Enregistrement",
+    "الباقة": "Forfait",
+    "فتح": "Ouvrir",
+    "الإيصال": "Reçu",
+    "أدخل": "Saisir",
+    "مركز": "Centre",
+    "رفع": "Téléverser",
+    "رابط": "Lien",
+    "بيانات": "Données",
+    "التوصيل": "Livraison",
+    "الحجز": "Réservation",
+    "الفرع": "Succursale",
+    "مع": "avec",
+    "إدارة": "Gestion",
+    "المطبخ": "Cuisine",
+    "التحقق": "Vérification",
+    "تفعيل": "Activer",
+    "الملف": "Fichier",
+    "اليوم": "Aujourd’hui",
+    "قبل": "avant",
+    "الآن": "maintenant",
+    "الدور": "Le rôle",
+    "رمز": "Code",
+    "الصنف": "Article",
+    "نشط": "Actif",
+    "بعد": "après",
+    "شاشة": "Écran",
+    "السائق": "Livreur",
+    "الطاولات": "Tables",
+    "الشاشة": "L’écran",
+    "اختياري": "Facultatif",
+    "إعادة": "Re-",
+    "تأكيد": "Confirmer",
+    "الرابط": "Le lien",
+    "الترجمة": "Traduction",
+    "نسخ": "Copier",
+    "المحتوى": "Contenu",
+    "تشغيل": "Lancer",
+    "الفئة": "Catégorie",
+    "ربط": "Lier",
+    "معاينة": "Aperçu",
+    "المراجعة": "Révision",
+    "القسم": "Section",
+    "مساحة": "Espace",
+    "إعداد": "Paramètres",
+    "يجب": "doit",
+    "جديد": "Nouveau",
+    "قسم": "Section",
+    "الهوية": "Identité",
+    "النظام": "Système",
+    "الإرسال": "Envoi",
+    "جاهز": "Prêt",
+    "وصف": "Description",
+    "حسب": "par",
+    "لم": "n’a pas",
+    "النادل": "Serveur",
+    "ترجمة": "Traduction",
+    "وقت": "Heure",
+    "تحتاج": "nécessite",
+    "للمراجعة": "pour révision",
+    "الفروع": "Succursales",
+    "عن": "à propos",
+    "الطاولة": "La table",
+    "تحميل": "Télécharger",
+    "هذا": "ce",
+    "تجربة": "Expérience",
+    "قالب": "Modèle",
+    "مثال": "Exemple",
+    "بدون": "sans",
+    "تجهيز": "Préparation",
+    "ملف": "Fichier",
+    "اختيار": "Choix",
+    "الميزة": "La fonctionnalité",
+    "العرض": "L’offre",
+    "الدعم": "Support",
+    "تعديل": "Modifier",
+    "حتى": "jusqu’à",
+    "التحويل": "Transfert",
+    "المفتاح": "La clé",
+    "واحدة": "une",
+    "مرفوض": "Rejeté",
+    "إيصال": "Reçu",
+    "أحرف": "caractères",
+    "بانتظار": "en attente",
+    "من": "de",
+    "في": "dans",
+    "على": "sur",
+    "إلى": "à",
+    "أو": "ou",
+    "لا": "Non",
+    "عند": "à",
+    "أخرى": "Autre",
+    "الكل": "Tout",
+    "المنيو": "Menu",
+    "منيو": "Menu",
+    "العملاء": "Clients",
+    "المطاعم": "Restaurants",
+    "الإعدادات": "Paramètres",
+    "الحجوزات": "Réservations",
+    "اللغة": "Langue",
+    "حالة": "Statut",
+    "الإجمالي": "Total",
+    "الاسم": "Nom",
+    "حفظ": "Enregistrer",
+    "إضافة": "Ajouter",
+    "حذف": "Supprimer",
+    "إلغاء": "Annuler",
+    "إرسال": "Envoyer",
+    "إنشاء": "Créer",
+    "اختر": "Choisir",
+    "اسم": "Nom",
+    "البريد": "E-mail",
+    "البيانات": "Données",
+    "إغلاق": "Fermer",
+    "متاح": "Disponible",
+    "الدخول": "Connexion",
+    "تسجيل الدخول": "Se connecter",
+    "بحث": "Rechercher",
+    "إعدادات": "Paramètres",
+    "الرئيسية": "Accueil",
+    "المنصة": "Plateforme",
+    "الأمان": "Sécurité",
+    "المساحة": "Espace",
+    "تحديث": "Mise à jour",
+    "الإشعارات": "Notifications",
+    "الكاشير": "Caissier",
+    "المخزون": "Stock",
+    "الموظفون": "Personnel",
+    "الحضور": "Présence",
+    "التسويق": "Marketing",
+    "الحملات": "Campagnes",
+    "المدفوعات": "Paiements",
+    "البطاقات": "Cartes",
+    "المفاتيح": "Clés",
+    "المحفظة": "Portefeuille",
+    "المكافآت": "Récompenses",
+    "التفتيش": "Inspection",
+    "التقارير": "Rapports",
+    "الاتجاهات": "Analytique",
+    "المبيعات": "Ventes",
+    "شراء": "Acheter",
+    "الموافقة": "Approbation",
+    "الموافقات": "Approbations",
+    "المشتريات": "Achats",
+    "الشحن": "Expédition",
+    "المكتبة": "Bibliothèque",
+    "الرصيد": "Solde",
+    "المحفوظ": "Enregistré",
+    "عميل": "Client",
+    "مطعم": "Restaurant",
+    "فئات": "Catégories",
+    "أصناف": "Articles",
+    "أسعار": "Prix",
+    "التوفر": "Disponibilité",
+    "ساعات العمل": "Heures d’ouverture",
+    "الأيام": "Jours",
+    "نقطة البيع": "POS",
+    "طباعة": "Imprimer",
+    "الطابعة": "Imprimante",
+    "الشبكة": "Réseau",
+    "متصل": "En ligne",
+    "غير متصل": "Hors ligne",
+    "مزامنة": "Synchronisation",
+    "آخر مزامنة": "Dernière synchronisation",
+    "تحت التجهيز": "En préparation",
+    "مسودة": "Brouillon",
+    "مجملة": "Programmé",
+    "مكتمل": "Terminé",
+    "مكتملة": "Terminée",
+    "مؤكد": "Confirmé",
+    "ملغي": "Annulé",
+    "مرتجع": "Retournée",
+    "ينتظر": "En attente",
+    "تم": "Fait",
+    "تتمة": "Continuer",
+    "التالي": "Suivant",
+    "السابق": "Précédent",
+    "رجوع": "Retour",
+    "موافقة": "Approuver",
+    "إعتماد": "Approuver",
+    "رفض": "Rejeter",
+    "نعم": "Oui",
+    "ربما": "Peut-être",
+    "لا يمكن": "Impossible",
+    "لم نجد": "Introuvable",
+    "خطأ": "Erreur",
+    "نجاح": "Succès",
+    "تم بنجاح": "Réussi",
+    "فشل": "Échec",
+    "تحذير": "Avertissement",
+    "ملاحظة": "Note",
+    "تنبيه": "Alerte",
+    "مطلوب": "Requis",
+    "سريع": "Rapide",
+    "بسيط": "Simple",
+    "كبير": "Grand",
+    "صغير": "Petit",
+    "متوسط": "Moyen",
+    "عالي": "Élevé",
+    "منخفض": "Faible",
+    "الأعلى": "Plus élevé",
+    "الأدنى": "Plus bas",
+    "الأكثر": "Plus",
+    "الأقل": "Moins",
+    "الحديثة": "Récent",
+    "السابقة": "Précédent",
+    "التالية": "Suivant",
+    "الحالي": "Actuel",
+    "الجديد": "Nouveau",
+    "القديم": "Ancien",
+    "تغيير": "Changer",
+    "إظهار": "Montrer",
+    "إخفاء": "Masquer",
+    "تصدير": "Exporter",
+    "استيراد": "Importer",
+    "استلام": "Recevoir",
+    "تسليم": "Livrer",
+    "التسليم": "Livraison",
+    "استلام الطلب": "Récupérer la commande",
+    "الاستلام": "Récupération",
+    "الدفع نقداً": "Paiement en espèces",
+    "البطاقة": "Carte",
+    "النقاط": "Points",
+    "فروع": "succursales",
+    "فرع": "succursale",
+    "نسخة": "copie",
+    "ميزة": "fonctionnalité",
+    "ميزات": "fonctionnalités",
+    "مميزة": "fonctionnalité",
+    "متأخر": "En retard",
+    "متأخرة": "En retard",
+    "دقيقة": "min",
+    "د": "min",
+    "ثانية": "sec",
+    "ث": "sec",
+    "شهريًا": "mensuel",
+    "لغات": "langues",
+    "النكهات": "saveurs",
+    "بذكاء": "intelligemment",
+    "النطاق": "plage",
+    "نطاق": "plage",
+    "الضريبة": "taxe",
+    "ضريبة": "taxe",
+    "الخصم": "remise",
+    "خصم": "remise",
+    "قبل الخصم": "avant remise",
+    "التطبيق": "application",
+    "المتصفح": "navigateur",
+    "المشرف": "superviseur",
+    "ضيف": "invité",
+    "ضيوف": "invités",
+    "طفل": "enfant",
+    "أطفال": "enfants",
+    "سائق": "livreur",
+    "سائقون": "livreurs",
+    "مادة": "article",
+    "مواد": "articles",
+    "نجوم": "étoiles",
+    "إشعارات": "notifications",
+    "عملية": "opération",
+    "عمليات": "opérations",
+    "باقات": "forfaits",
+    "أدوار": "rôles",
+    "صلاحية": "permission",
+    "صلاحيات": "permissions",
+    "محفوظ": "enregistré",
+    "محفوظة": "enregistrée",
+    "غير مقروءة": "non lus",
+    "مقروءة": "lus",
+    "سوق": "marché",
+    "الصور": "photos",
+    "المقاطع": "clips",
+    "لبيع": "pour vendre",
+    "بحقوقك": "avec vos droits",
+    "بالإنجليزية": "en anglais",
+    "التشغيل": "exploitation",
+    "العمليات": "opérations",
+    "الأساسية": "de base",
+    "الرموز": "codes",
+    "التكاملات": "intégrations",
+    "التكامل": "intégration",
+    "عبر": "via",
+    "الجهاز": "appareil",
+    "يعمل": "fonctionne",
+    "الاشتراك": "abonnement",
+    "السعر": "prix",
+    "الأسعار": "prix",
+    "بموقع صالح": "avec une position valide",
+    "صالح": "valide",
+    "غائب": "absent",
+    "حاضر": "présent"
+  }
+};
+const autoFallbackTranslations: Partial<Record<Exclude<Language, "ar">, Record<string, string>>> = {
+  en: {
+    "الحالة": "Status", "الإجمالي": "Total", "قيد التحضير": "Preparing", "لا يوجد نطاق توصيل متاح": "No delivery zone available", "حدد موقعك أولًا": "Select your location first", "رقم الطلب": "Order number", "الفترة المتاحة": "Available slot", "الفترات المتاحة للحجز": "Available reservation slots", "مقاعد": "seats", "إلغاء الطلب": "Cancel order", "إعادة الطلب": "Reorder", "الدفع نقدي عند الاستلام": "Cash on delivery", "تواصل معنا": "Contact us", "الحجز": "Reservations", "تجربة طعام مميز": "A remarkable dining experience", "طلب أسهل، وذكريات أجمل": "Easier ordering, better memories", "الكل": "All", "متوفر": "Available", "ر.س": "SAR", "إدارة المنصة": "Platform management", "الإعدادات والتشغيل": "Settings & operations", "اللغات": "Languages", "لا تتوفر سلسلة مبيعات يومية محفوظة بعد. ستظهر هنا بعد ربط تقرير الفترة ببيانات الطلبات اليومية.": "No daily sales series is available yet. It will appear once the period report is connected to daily order data.", "إجمالي المبيعات من المؤشر الحالي": "Total sales from the current metric", "غير متاح": "Unavailable", "الأصناف الأكثر مبيعاً": "Top-selling items", "حسب عدد الطلبات": "By order count", "عرض المنيو": "View menu", "لا يتوفر تقرير أصناف فعلي بعد. سيظهر الترتيب عند ربط الطلبات ببنودها المحفوظة في orderItems.": "No item report is available yet. Rankings will appear after orders are linked to saved order items.", "الأمن والحساب والجلسات": "Security, account & sessions", "مركز العمليات": "Operations center", "الطلبات النشطة": "Active orders", "الطلبات المتأخرة": "Delayed orders", "تحتاج إلى انتباه": "Needs attention", "الخدمات": "Services", "عرض الطلبات": "Order view", "آخر مزامنة": "Last sync"
+  },
+  fr: {
+    "الحالة": "Statut", "الإجمالي": "Total", "قيد التحضير": "En préparation", "لا يوجد نطاق توصيل متاح": "Aucune zone de livraison disponible", "حدد موقعك أولًا": "Sélectionnez d’abord votre position", "رقم الطلب": "Numéro de commande", "الفترة المتاحة": "Créneau disponible", "الفترات المتاحة للحجز": "Créneaux de réservation disponibles", "مقاعد": "places", "إلغاء الطلب": "Annuler la commande", "إعادة الطلب": "Commander à nouveau", "الدفع نقدي عند الاستلام": "Paiement en espèces à la livraison", "تواصل معنا": "Nous contacter", "الحجز": "Réservations", "الكل": "Tout", "متوفر": "Disponible", "ر.س": "SAR", "إدارة المنصة": "Gestion de la plateforme", "الإعدادات والتشغيل": "Paramètres et opérations", "اللغات": "Langues", "لا تتوفر سلسلة مبيعات يومية محفوظة بعد. ستظهر هنا بعد ربط تقرير الفترة ببيانات الطلبات اليومية.": "Aucune série de ventes quotidienne n’est encore disponible. Elle apparaîtra lorsque le rapport de période sera relié aux commandes quotidiennes.", "إجمالي المبيعات من المؤشر الحالي": "Ventes totales de l’indicateur actuel", "غير متاح": "Indisponible", "الأصناف الأكثر مبيعاً": "Articles les plus vendus", "حسب عدد الطلبات": "Par nombre de commandes", "عرض المنيو": "Voir le menu", "لا يتوفر تقرير أصناف فعلي بعد. سيظهر الترتيب عند ربط الطلبات ببنودها المحفوظة في orderItems.": "Aucun rapport d’articles n’est encore disponible. Le classement apparaîtra lorsque les commandes seront reliées aux articles enregistrés.", "الأمن والحساب والجلسات": "Sécurité, compte et sessions", "مركز العمليات": "Centre des opérations", "الطلبات النشطة": "Commandes actives", "الطلبات المتأخرة": "Commandes en retard", "تحتاج إلى انتباه": "Nécessite une attention", "الخدمات": "Services", "عرض الطلبات": "Vue des commandes", "آخر مزامنة": "Dernière synchronisation"
+  },
+  ur: {
+    "لوحة التحكم": "ڈیش بورڈ", "نظرة عامة": "جائزہ", "اللغة": "زبان", "حفظ": "محفوظ کریں", "إلغاء": "منسوخ کریں", "تسجيل الخروج": "لاگ آؤٹ", "البحث": "تلاش", "الإشعارات": "اطلاعات", "الحالة": "حیثیت", "الإجمالي": "کل", "قيد التحضير": "تیاری میں", "رقم الطلب": "آرڈر نمبر", "متوفر": "دستیاب", "الكل": "سب", "ر.س": "سعودی ریال", "المطعم": "ریستوران", "الفرع": "برانچ", "المنيو": "مینو", "الطلبات": "آرڈرز", "الحجوزات": "ریزرویشنز", "العملاء": "صارفین", "السائقون": "ڈرائیورز", "الإعدادات": "ترتیبات", "تواصل معنا": "ہم سے رابطہ کریں", "إدارة المنصة": "پلیٹ فارم مینجمنٹ", "الإعدادات والتشغيل": "ترتیبات اور آپریشنز", "اللغات": "زبانیں"
+  }
+};
+
+const genericUiTranslations: Record<"en" | "fr", Record<string, string>> = {
+  en: {
+    "الحقوق": "Rights", "والحقوق": "and rights", "العملاء": "Customers", "الطلبات": "Orders", "طلبات": "Orders", "المشتريات": "Purchases", "المحتوى": "Content", "محتوى": "Content", "الشحن": "Shipping", "المكتبة": "Library", "الرصيد": "Balance", "المحفوظ": "Saved", "إضافة": "Add", "عميل": "Customer", "مطعم": "Restaurant", "المطاعم": "Restaurants", "شراء": "Purchase", "الموافقة": "Approval", "للموافقة": "For approval", "المبيعات": "Sales", "البيع": "Selling", "العروض": "Offers", "الفواتير": "Invoices", "الموافقة عليها": "Pending approval", "طلبات الشحن": "Shipping requests", "طلبات البطاقات": "Card requests", "مراجعة المحتوى": "Content review", "مراجعة": "Review", "نشط": "Active", "نشطة": "Active", "غير نشط": "Inactive", "الكل": "All", "بحث": "Search", "حفظ": "Save", "إلغاء": "Cancel", "إعدادات": "Settings", "التفاصيل": "Details", "الدخول": "Open", "تسجيل الدخول": "Sign in", "تسجيل الخروج": "Sign out", "الاسم": "Name", "البريد الإلكتروني": "Email", "رقم الجوال": "Phone number", "الحالة": "Status", "الإجمالي": "Total", "اليوم": "Today", "الشهر": "Month", "المحفظة": "Wallet", "المكافآت": "Rewards", "التفعيل": "Activation", "المفاتيح": "Keys", "البطاقات": "Cards", "النظرة العامة": "Overview", "الإدارة": "Management", "المنصة": "Platform", "الرصيد المحفوظ": "Saved balance", "البيانات": "Data", "العمل": "Work", "أخرى": "Other", "مركز العملاء": "Customer center", "قائمة العملاء والحقوق": "Customers and rights", "إدارة آمنة للحسابات والمحتوى والمبيعات والمحفظة من نفس نظرة المنصة.": "Securely manage accounts, content, sales, and wallets from the same platform view.", "دخول مؤقت مراقب": "Monitored temporary access", "إجمالي العملاء": "Total customers", "النشطون": "Active", "المحتوى المعروض": "Listed content", "رصيد المحافظ": "Wallet balance", "إضافة عميل": "Add customer", "إنشاء حساب عميل من النموذج المنفصل": "Create a customer account from the dedicated form", "طلبات العملاء": "Customer orders", "عرض وتتبع الطلبات المرتبطة بالحسابات": "View and track account-linked orders", "مشتريات للموافقة": "Purchases for approval", "مراجعة طلبات المحتوى والفواتير": "Review content requests and invoices", "الشحن وNFC": "Shipping and NFC", "طلبات البطاقة، الشحن، وتفعيل المفاتيح": "Card requests, shipping, and key activation", "مكتبة المشتريات": "Purchase library", "الملفات التي تُسلّم رقميًا بعد الدفع": "Files delivered digitally after payment", "مراجعة محتوى العملاء": "Review customer content", "الاعتماد، الرفض، والفحص قبل النشر": "Approval, rejection, and pre-publication review", "ابحث باسم العميل أو البريد أو الجوال": "Search by customer name, email, or phone", "لا توجد حسابات عملاء مطابقة.": "No matching customer accounts.", "تفضيلات الحساب": "Account preferences", "Profile جاهز": "Profile ready", "Profile غير منشور": "Profile unpublished", "لا توجد جلسة": "No session", "كلمة المرور": "Password", "تعذر تحميل قائمة العملاء.": "Unable to load the customer list."
+  },
+  fr: {
+    "الحقوق": "Droits", "والحقوق": "et droits", "العملاء": "Clients", "الطلبات": "Commandes", "طلبات": "Commandes", "المشتريات": "Achats", "المحتوى": "Contenu", "محتوى": "Contenu", "الشحن": "Expédition", "المكتبة": "Bibliothèque", "الرصيد": "Solde", "المحفوظ": "Enregistré", "إضافة": "Ajouter", "عميل": "Client", "مطعم": "Restaurant", "المطاعم": "Restaurants", "شراء": "Acheter", "الموافقة": "Approbation", "للموافقة": "À approuver", "المبيعات": "Ventes", "البيع": "Vente", "العروض": "Offres", "الفواتير": "Factures", "الموافقة عليها": "En attente d’approbation", "طلبات الشحن": "Demandes d’expédition", "طلبات البطاقات": "Demandes de cartes", "مراجعة المحتوى": "Révision du contenu", "مراجعة": "Réviser", "نشط": "Actif", "نشطة": "Actif", "غير نشط": "Inactif", "الكل": "Tout", "بحث": "Rechercher", "حفظ": "Enregistrer", "إلغاء": "Annuler", "إعدادات": "Paramètres", "التفاصيل": "Détails", "الدخول": "Ouvrir", "تسجيل الدخول": "Se connecter", "تسجيل الخروج": "Se déconnecter", "الاسم": "Nom", "البريد الإلكتروني": "E-mail", "رقم الجوال": "Téléphone", "الحالة": "Statut", "الإجمالي": "Total", "اليوم": "Aujourd’hui", "الشهر": "Mois", "المحفظة": "Portefeuille", "المكافآت": "Récompenses", "التفعيل": "Activation", "المفاتيح": "Clés", "البطاقات": "Cartes", "النظرة العامة": "Vue d’ensemble", "الإدارة": "Gestion", "المنصة": "Plateforme", "الرصيد المحفوظ": "Solde enregistré", "البيانات": "Données", "العمل": "Travail", "أخرى": "Autre", "مركز العملاء": "Centre clients", "قائمة العملاء والحقوق": "Clients et droits", "إدارة آمنة للحسابات والمحتوى والمبيعات والمحفظة من نفس نظرة المنصة.": "Gérez en sécurité les comptes, le contenu, les ventes et les portefeuilles depuis la même vue de la plateforme.", "دخول مؤقت مراقب": "Accès temporaire surveillé", "إجمالي العملاء": "Total clients", "النشطون": "Actifs", "المحتوى المعروض": "Contenu publié", "رصيد المحافظ": "Solde des portefeuilles", "إضافة عميل": "Ajouter un client", "إنشاء حساب عميل من النموذج المنفصل": "Créer un compte client depuis le formulaire dédié", "طلبات العملاء": "Commandes clients", "عرض وتتبع الطلبات المرتبطة بالحسابات": "Voir et suivre les commandes liées aux comptes", "مشتريات للموافقة": "Achats à approuver", "مراجعة طلبات المحتوى والفواتير": "Réviser les demandes de contenu et les factures", "الشحن وNFC": "Expédition et NFC", "طلبات البطاقة، الشحن، وتفعيل المفاتيح": "Demandes de cartes, expédition et activation des clés", "مكتبة المشتريات": "Bibliothèque d’achats", "الملفات التي تُسلّم رقميًا بعد الدفع": "Fichiers livrés numériquement après paiement", "مراجعة محتوى العملاء": "Réviser le contenu client", "الاعتماد، الرفض، والفحص قبل النشر": "Approbation, rejet et contrôle avant publication", "ابحث باسم العميل أو البريد أو الجوال": "Rechercher par nom, e-mail ou téléphone", "لا توجد حسابات عملاء مطابقة.": "Aucun compte client correspondant.", "تفضيلات الحساب": "Préférences du compte", "Profile جاهز": "Profil prêt", "Profile غير منشور": "Profil non publié", "لا توجد جلسة": "Aucune session", "كلمة المرور": "Mot de passe", "تعذر تحميل قائمة العملاء.": "Impossible de charger la liste des clients."
+  }
+};
+
+const recentFeatureTranslations: Record<Language, Record<string, string>> = {
+  ar: {},
+  en: {
+    "برجر": "Burger", "حلويات": "Desserts", "قهوة": "Coffee", "وجبات": "Meals", "مشروبات": "Drinks", "أطعمة ومشروبات": "Food & drinks", "أطعمة": "Food", "لحظات الطعام": "Food moments", "عروض": "Offers", "كل السوق": "All marketplace", "أطباق وصور": "Dishes & photos", "وصفات جزئية": "Recipe previews", "Trend الشيف": "Chef Trend", "سوق نفود للمحتوى": "NFOOD Content Market", "تنبيه سريع: أنت داخل سوق نفود للمحتوى، وليس قائمة Menu.": "Quick notice: you are in the NFOOD content market, not a menu.", "هذا سوق لبيع الصور والوصفات والخدمات الغذائية للمطاعم الموجودة في المنصة. البيع حصري للعملاء، والمطاعم تدخل للشراء أو عرض نشاطها فقط.": "This is a market for selling food photos, recipes, and services to restaurants on the platform. Selling is exclusive to customers; restaurants may buy or showcase activity only.", "سوق محتوى · ليس Menu": "Content market · not a menu", "سوق مستقل للطعام والشراب والوصفات الجزئية ومحتوى الشيف، منفصل تمامًا عن قوائم المطاعم. تصفّح، احفظ، شارك، واشترِ المحتوى المرخّص من محفظتك؛ العملاء هم صناع المحتوى والبائعون، والمطاعم هي الجهات المشترية.": "An independent market for food, drinks, recipe previews, and chef content, completely separate from restaurant menus. Browse, save, share, and buy licensed content from your wallet; customers create and sell, while restaurants are the buyers.", "نوع الصفحة": "Page type", "سوق محتوى، وليس Menu": "Content market, not a menu", "الأجهزة النشطة وحوكمة الدخول": "Active devices & access governance", "طلبات البطاقات والمفاتيح": "Card & key requests", "لا توجد أجهزة مسجلة بعد.": "No devices registered yet.", "لا توجد طلبات بطاقات معلقة.": "No pending card requests.", "قيد المراجعة": "Pending review", "اعتماد": "Approve", "تعطيل": "Disable", "موافقة": "Approve", "يرفض": "Reject", "سوق عام للطعام والشراب والوصفات الجزئية ومحتوى الشيف. تصفّح، احفظ، شارك، واشترِ المحتوى المرخّص من محفظتك دون تعليقات أو كشف هويات خاصة.": "A public market for food, drinks, recipe previews, and chef content. Browse, save, share, and buy licensed content from your wallet without comments or private identity disclosure.", "ابدأ كصانع محتوى": "Start as a content creator", "استوديو التصوير": "Creator Studio", "المحتوى المعتمد": "Approved content", "نطاق السوق": "Marketplace scope", "عام · للجميع": "Public · everyone", "الأمان": "Safety", "مراجعة قبل النشر": "Review before publishing", "ابحث في سوق نفود": "Search NFOOD market", "معاينة مرخّصة": "Licensed preview", "المعاينة مائية، والنسخة الكاملة تُفتح بعد تسوية الشراء.": "The preview is watermarked; the full version unlocks after purchase.", "بيع حصري للعملاء": "Customer-only sales", "المطاعم تعرض نشاطها فقط، والشراء والمكافآت للعملاء حصريًا.": "Restaurants may showcase activity only; purchases and rewards are exclusive to customers.", "اكتشف الاتجاهات": "Discover trends", "بدون تعليقات": "No comments", "يوجد مطاعم نشطة": "Active restaurants are available", "جارٍ تحميل السوق...": "Loading marketplace...", "تعذر تحميل السوق حاليًا.": "The marketplace is unavailable right now.", "لا توجد نتائج في هذا القسم بعد. جرّب قسمًا آخر أو ابدأ من كاميرا Studio.": "No results in this section yet. Try another section or start from the Studio camera.", "صورة موثقة": "Verified photo", "إضافة إلى المفضلة": "Add to favorites", "مشاركة المحتوى": "Share content", "إعجاب": "Like", "أُعجبني": "Liked", "شراء": "Buy", "دخول للشراء": "Sign in to buy", "قواعد سوق نفود": "NFOOD market rules", "حقوق رقمية واضحة": "Clear digital rights", "مشاركة المعاينة": "Share preview", "نسخ أو مشاركة الرابط": "Copy or share link", "تعذر إتمام الشراء من المحفظة": "Wallet purchase could not be completed", "تم نسخ رابط المعاينة": "Preview link copied", "مساحة Studio والمكتبة": "Studio & library storage", "يرجى ترقية مساحتك لمتابعة رفع الصور.": "Please upgrade your storage to continue uploading photos.", "تدار المساحة من إدارة المنصة، وتُحجز للصور المعتمدة فقط.": "Storage is managed by platform administration and reserved for approved photos.", "رفع صورة جديدة": "Upload a new photo", "التقاط وفحص الصورة": "Capture and scan photo", "فتح كاميرا Studio": "Open Studio camera", "اختيار صورة": "Choose photo", "المقاطع ممنوعة. يجب التقاط الصورة الآن من كاميرا الجهاز؛ لا تُقبل الصور القديمة أو المرفوعة من مكتبة الصور في سوق نفود.": "Videos are not allowed. Capture the photo now with the device camera; old photos or library uploads are not accepted in the NFOOD market.", "عرض عام آمن": "Safe public listing", "المطاعم ترى معاينة مائية فقط قبل الشراء.": "Restaurants see only a watermarked preview before purchase.", "أنت صاحب قرار الموافقة على المكافأة وتسليم الأصل.": "You decide whether to approve the reward and deliver the original.", "مكتبتي": "My library", "لم ترفع صورًا بعد.": "You have not uploaded photos yet.", "عرض الصورة للبيع": "List photo for sale", "معاينة محمية": "Protected preview", "سيظهر المحتوى لجميع المطاعم المؤهلة دون كشف قائمة المطاعم في هذه الصفحة.": "Content appears to eligible restaurants without revealing a restaurant list on this page.", "تصنيف الطعام": "Food category", "عام للجميع": "Public for everyone", "خاص للأصدقاء المدعوين": "Private for invited friends", "أصناف الطعام والهاشتاقات": "Food types & hashtags", "تُدار القائمة والهاشتاقات مركزيًا من إدارة المنصة وCOO.": "The catalog and hashtags are centrally managed by platform administration and the COO.", "وصف مختصر اختياري": "Optional short description", "سعر الصورة: 5.00 SAR": "Photo price: 5.00 SAR", "يحدده نظام المنصة مركزيًا، ولا يمكن للعميل تغييره.": "Set centrally by the platform; customers cannot change it.", "جارٍ النشر...": "Publishing...", "نشر للعرض العام": "Publish publicly", "عروضي الحالية": "My current listings", "فحص آلي + علامة مائية": "Automatic scan + watermark", "لا توجد عروض منشورة بعد.": "No listings published yet.", "بعد شراء الصورة واعتمادك، تنتقل النسخة الأصلية إلى مكتبتك مع إشعار بالمكافأة.": "After the photo is purchased and you approve it, the original moves to your library with a reward notification."
+  },
+  fr: {
+    "برجر": "Burger", "حلويات": "Desserts", "قهوة": "Café", "وجبات": "Repas", "مشروبات": "Boissons", "أطعمة ومشروبات": "Plats et boissons", "أطعمة": "Plats", "لحظات الطعام": "Moments gourmands", "عروض": "Offres", "كل السوق": "Tout le marché", "أطباق وصور": "Plats et photos", "وصفات جزئية": "Aperçus de recettes", "Trend الشيف": "Tendance des chefs", "سوق نفود للمحتوى": "Marché de contenu NFOOD", "تنبيه سريع: أنت داخل سوق نفود للمحتوى، وليس قائمة Menu.": "Avis : vous êtes dans le marché de contenu NFOOD, pas dans un menu.", "هذا سوق لبيع الصور والوصفات والخدمات الغذائية للمطاعم الموجودة في المنصة. البيع حصري للعملاء، والمطاعم تدخل للشراء أو عرض نشاطها فقط.": "Ce marché vend des photos, recettes et services culinaires aux restaurants de la plateforme. La vente est réservée aux clients ; les restaurants peuvent acheter ou présenter leur activité.", "سوق محتوى · ليس Menu": "Marché de contenu · pas un menu", "سوق مستقل للطعام والشراب والوصفات الجزئية ومحتوى الشيف، منفصل تمامًا عن قوائم المطاعم. تصفّح، احفظ، شارك، واشترِ المحتوى المرخّص من محفظتك؛ العملاء هم صناع المحتوى والبائعون، والمطاعم هي الجهات المشترية.": "Un marché indépendant de plats, boissons, aperçus de recettes et contenu de chefs, séparé des menus. Parcourez, enregistrez, partagez et achetez du contenu sous licence ; les clients créent et vendent, les restaurants achètent.", "نوع الصفحة": "Type de page", "سوق محتوى، وليس Menu": "Marché de contenu, pas un menu", "الأجهزة النشطة وحوكمة الدخول": "Appareils actifs et contrôle des accès", "طلبات البطاقات والمفاتيح": "Demandes de cartes et de clés", "لا توجد أجهزة مسجلة بعد.": "Aucun appareil enregistré.", "لا توجد طلبات بطاقات معلقة.": "Aucune demande de carte en attente.", "قيد المراجعة": "En cours de vérification", "اعتماد": "Approuver", "تعطيل": "Désactiver", "موافقة": "Approuver", "يرفض": "Refuser", "ابدأ كصانع محتوى": "Commencer comme créateur", "استوديو التصوير": "Studio créateur", "المحتوى المعتمد": "Contenu approuvé", "نطاق السوق": "Périmètre du marché", "عام · للجميع": "Public · tout le monde", "الأمان": "Sécurité", "مراجعة قبل النشر": "Vérification avant publication", "ابحث في سوق نفود": "Rechercher dans le marché NFOOD", "معاينة مرخّصة": "Aperçu sous licence", "بيع حصري للعملاء": "Vente réservée aux clients", "اكتشف الاتجاهات": "Découvrir les tendances", "بدون تعليقات": "Sans commentaires", "يوجد مطاعم نشطة": "Des restaurants actifs sont disponibles", "جارٍ تحميل السوق...": "Chargement du marché...", "صورة موثقة": "Photo vérifiée", "إضافة إلى المفضلة": "Ajouter aux favoris", "مشاركة المحتوى": "Partager le contenu", "إعجاب": "J’aime", "أُعجبني": "Aimé", "شراء": "Acheter", "دخول للشراء": "Se connecter pour acheter", "قواعد سوق نفود": "Règles du marché NFOOD", "حقوق رقمية واضحة": "Droits numériques clairs", "مشاركة المعاينة": "Partager l’aperçu", "نسخ أو مشاركة الرابط": "Copier ou partager le lien", "تعذر إتمام الشراء من المحفظة": "L’achat via le portefeuille a échoué", "تم نسخ رابط المعاينة": "Lien d’aperçu copié", "مساحة Studio والمكتبة": "Stockage du Studio et de la bibliothèque", "يرجى ترقية مساحتك لمتابعة رفع الصور.": "Veuillez mettre à niveau votre espace pour continuer à envoyer des photos.", "رفع صورة جديدة": "Envoyer une nouvelle photo", "التقاط وفحص الصورة": "Capturer et analyser la photo", "فتح كاميرا Studio": "Ouvrir la caméra du Studio", "اختيار صورة": "Choisir une photo", "عرض عام آمن": "Publication publique sécurisée", "مكتبتي": "Ma bibliothèque", "عرض الصورة للبيع": "Mettre la photo en vente", "معاينة محمية": "Aperçu protégé", "تصنيف الطعام": "Catégorie alimentaire", "عام للجميع": "Public pour tous", "خاص للأصدقاء المدعوين": "Privé pour les amis invités", "أصناف الطعام والهاشتاقات": "Types de plats et hashtags", "وصف مختصر اختياري": "Description courte facultative", "سعر الصورة: 5.00 SAR": "Prix de la photo : 5,00 SAR", "جارٍ النشر...": "Publication...", "نشر للعرض العام": "Publier publiquement", "عروضي الحالية": "Mes publications actuelles", "فحص آلي + علامة مائية": "Analyse automatique + filigrane", "لا توجد عروض منشورة بعد.": "Aucune publication pour le moment.", "سيظهر المحتوى لجميع المطاعم المؤهلة دون كشف قائمة المطاعم في هذه الصفحة.": "Le contenu sera visible par les restaurants éligibles sans révéler leur liste.", "المطاعم ترى معاينة مائية فقط قبل الشراء.": "Les restaurants voient uniquement un aperçu filigrané avant l’achat.", "بعد شراء الصورة واعتمادك، تنتقل النسخة الأصلية إلى مكتبتك مع إشعار بالمكافأة.": "Après l’achat et votre approbation, l’original rejoint votre bibliothèque avec une notification de récompense."
+  },
+  ur: {}, es: {}, de: {}, tr: {}
+};
+
+const coreAutoTranslations: Record<"en" | "fr", Record<string, string>> = {
+  en: Object.fromEntries(Object.entries(arabic).map(([key, arabicText]) => [arabicText, english[key as keyof typeof english]])),
+  fr: Object.fromEntries(Object.entries(arabic).map(([key, arabicText]) => [arabicText, french[key as keyof typeof french]])),
+};
+
+function getAutoTranslationDictionary(language: Language): Record<string, string> | null {
+  if (language === "ar") return null;
+  const sharedFallback = language === "fr"
+    ? { ...autoFallbackTranslations.en, ...recentFeatureTranslations.en, ...legacyUiTranslations.en, ...modernUiTranslations.en }
+    : {};
+  const coreDictionary = coreAutoTranslations[language as "en" | "fr"] ?? {};
+  return { ...genericUiTranslations[language as "en" | "fr"], ...sharedFallback, ...autoFallbackTranslations[language], ...recentFeatureTranslations[language], ...legacyUiTranslations[language], ...modernUiTranslations[language], ...coreDictionary };
+}
+
+const autoTranslationEntriesCache: Partial<Record<Exclude<Language, "ar">, Array<[RegExp, string]> | null>> = {};
+function getAutoTranslationEntries(language: Language): Array<[RegExp, string]> | null {
+  if (language === "ar") return null;
+  if (!(language in autoTranslationEntriesCache)) {
+    const dictionary = getAutoTranslationDictionary(language) ?? {};
+    autoTranslationEntriesCache[language] = Object.entries(dictionary)
+      .filter(([from, to]) => from.trim() && to.trim() && from !== to)
+      .sort(([left], [right]) => right.length - left.length)
+      .map(([from, to]) => [compileArabicEntryPattern(from), to]);
+  }
+  return autoTranslationEntriesCache[language] ?? [];
+}
+
+const PURE_ARABIC_TOKEN = /^[\u0600-\u06FF\u064B-\u0652\u0670]+$/;
+function compileArabicEntryPattern(from: string): RegExp {
+  if (!/\s/.test(from) && PURE_ARABIC_TOKEN.test(from)) {
+    const source = `(?<![\u0600-\u06FF])${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\u0600-\u06FF])`;
+    try {
+      return new RegExp(source, "g");
+    } catch {
+      // lookbehind unsupported (Safari < 16.4): fall back to a plain match
+    }
+  }
+  return new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+}
+
+const fragmentEntriesCache: Partial<Record<Exclude<Language, "ar">, Array<{ re: RegExp; to: string }> | null>> = {};
+function getFragmentEntries(language: Language): Array<{ re: RegExp; to: string }> | null {
+  if (language === "ar") return null;
+  if (!(language in fragmentEntriesCache)) {
+    const dict = operationalFragmentTranslations[language as Exclude<Language, "ar">] ?? {};
+    const entries = Object.entries(dict)
+      .filter(([from, to]) => from.trim() && to.trim() && from !== to)
+      .sort(([left], [right]) => right.length - left.length);
+    fragmentEntriesCache[language] = entries.map(([from, to]) => ({ re: compileArabicEntryPattern(from), to }));
+  }
+  return fragmentEntriesCache[language] ?? null;
+}
+
+function applyOperationalFragments(source: string, language: Language): string {
+  if (language === "ar" || !/[\u0600-\u06FF]/.test(source)) return source;
+  const entries = getFragmentEntries(language);
+  if (!entries) return source;
+  let result = source;
+  let pass = 0;
+  while (/[\u0600-\u06FF]/.test(result) && pass++ < 3) {
+    let changed = false;
+    for (const { re, to } of entries) {
+      const next = result.replace(re, to);
+      if (next !== result) { result = next; changed = true; }
+    }
+    if (!changed) break;
+  }
+  return result;
+}
+
+type DatabaseTranslationEntry = { translationKey: string; sourceText: string; targetLanguage: string; translatedText: string | null };
+const databaseUiTranslations: Record<UiLanguage, Record<string, string>> = { ar: {}, en: {}, fr: {} };
+export function setDatabaseUiTranslations(entries: DatabaseTranslationEntry[]) {
+  for (const locale of UI_LANGUAGES) databaseUiTranslations[locale] = {};
+  for (const entry of entries) {
+    if (isUiLanguage(entry.targetLanguage) && entry.translatedText?.trim()) {
+      databaseUiTranslations[entry.targetLanguage][entry.translationKey] = entry.translatedText.trim();
+      databaseUiTranslations[entry.targetLanguage][entry.sourceText] = entry.translatedText.trim();
+    }
+  }
+}
+
+export function autoTranslateText(source: string, language: Language): string {
+  if (language === "ar" || !source.trim()) return source;
+  const databaseTranslation = isUiLanguage(language) ? databaseUiTranslations[language][source] : undefined;
+  if (databaseTranslation && !/[\u0600-\u06FF]/.test(databaseTranslation)) return databaseTranslation;
+  const entries = getAutoTranslationEntries(language);
+  if (!entries) return source;
+  const translated = entries.reduce((text, [re, to]) => text.replace(re, to), source);
+  return applyOperationalFragments(translated, language);
+}
+
+export function findUntranslatedArabic(source: string, language: Language): string[] {
+  if (language === "ar") return [];
+  return autoTranslateText(source, language).match(/[\u0600-\u06FF]+/g) ?? [];
+}
+
+export function refreshLegacyUiTranslations(language: Language) { applyLegacyUiTranslations(language, document); }
+
+function isNonVisualTranslationNode(node: Node | null) {
+  const element = node instanceof Element ? node : node?.parentElement;
+  return Boolean(element?.closest("style, script, template, noscript"));
+}
+
+function applyLegacyUiTranslations(language: Language, root: Node = document) {
+  if (typeof document === "undefined" || legacyTranslationInProgress || isNonVisualTranslationNode(root)) return;
+  legacyTranslationInProgress = true;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const textNode = node as Text;
+    if (isNonVisualTranslationNode(textNode)) continue;
+    const current = textNode.nodeValue ?? "";
+    const cached = legacyNodeSources.get(textNode);
+    const hasArabic = /[\u0600-\u06FF]/.test(current);
+    const knownStates = cached ? [cached, ...(["en", "fr"] as const).map((target) => autoTranslateText(cached, target))] : [];
+    if (!cached) {
+      legacyNodeSources.set(textNode, current);
+    } else {
+      const isKnownVariant = knownStates.includes(current) || (hasArabic && knownStates.some((state) => state.length > 1 && current.includes(state)));
+      if (hasArabic && !isKnownVariant) legacyNodeSources.set(textNode, current);
+    }
+    const source = legacyNodeSources.get(textNode) ?? current;
+    if (!source.trim()) continue;
+    const translated = autoTranslateText(source, language);
+    if (translated !== current) textNode.nodeValue = translated;
+  }
+  try {
+    const elements = root === document
+      ? Array.from(document.querySelectorAll<HTMLElement>("input, textarea, [aria-label], [title]"))
+      : root instanceof HTMLElement
+        ? [root, ...Array.from(root.querySelectorAll<HTMLElement>("input, textarea, [aria-label], [title]"))]
+        : root instanceof DocumentFragment
+          ? Array.from(root.querySelectorAll<HTMLElement>("input, textarea, [aria-label], [title]"))
+          : [];
+    for (const element of elements) {
+      for (const attribute of ["placeholder", "aria-label", "title"] as const) {
+        const source = element.getAttribute(attribute);
+        if (!source) continue;
+        const translated = autoTranslateText(source, language);
+        if (translated !== source) element.setAttribute(attribute, translated);
+      }
+    }
+  } finally {
+    legacyTranslationInProgress = false;
+  }
+}
+
+function flattenLocale(source: Record<string, unknown>, prefix = "") { return Object.entries(source).reduce<Record<string, string>>((result, [key, value]) => { const nextKey = prefix ? `${prefix}.${key}` : key; if (typeof value === "string") result[nextKey] = value; else if (value && typeof value === "object" && !Array.isArray(value)) Object.assign(result, flattenLocale(value as Record<string, unknown>, nextKey)); return result; }, {}); }
+const structuredTranslations: Record<"ar" | "en" | "fr", Record<string, string>> = { ar: flattenLocale(arLocale as Record<string, unknown>), en: flattenLocale(enLocale as Record<string, unknown>), fr: flattenLocale(frLocale as Record<string, unknown>) };
+export function resolveStructuredTranslation(language: Language, key: string) { return language === "ar" || language === "en" || language === "fr" ? structuredTranslations[language][key] : undefined; }
+export function interpolateTranslation(template: string, variables?: Record<string, string | number>) { return variables ? template.replace(/\{(\w+)\}/g, (_, name: string) => String(variables[name] ?? `{${name}}`)) : template; }
+const expandedLanguageFallback = { ...Object.fromEntries(Object.entries(arabic).map(([key, value]) => [key, english[key as keyof typeof english] || value])), dashboard: "ڈیش بورڈ" } as Record<keyof typeof arabic, string>;
+export type TranslationKey = keyof typeof arabic;
+export const translations: Record<Language, Record<TranslationKey, string>> = { ar: arabic, en: english, fr: french, ur: expandedLanguageFallback, es: expandedLanguageFallback, de: expandedLanguageFallback, tr: expandedLanguageFallback };
+
+export function createTranslator(language: Language) {
+  return (key: TranslationKey | string, variables?: Record<string, string | number>) => {
+    const databaseValue = isUiLanguage(language) ? databaseUiTranslations[language][key] : undefined;
+    const direct = databaseValue ?? resolveStructuredTranslation(language, key) ?? translations[language][key as TranslationKey];
+    const translated = direct ?? (language === "ar" ? key : autoTranslateText(key, language));
+    return interpolateTranslation(translated, variables);
+  };
+}
+
+type LanguageContextValue = { language: Language; direction: "rtl" | "ltr"; locale: string; isLanguageChanging: boolean; setLanguage: (language: Language, persist?: boolean) => void; t: (key: TranslationKey | string, variables?: Record<string, string | number>) => string; formatDate: (value: Date | string | number) => string; formatNumber: (value: number) => string };
+const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
+
+function readStoredLanguage(): Language { if (typeof window === "undefined") return "ar"; if (isPublicLanguagePath(window.location.pathname)) { const manual = window.localStorage.getItem(MENU_LANGUAGE_MANUAL_STORAGE_KEY); if (isUiLanguage(manual)) return manual; return detectVisitorLanguage(); } const stored = window.localStorage.getItem(DASHBOARD_LANGUAGE_STORAGE_KEY); return isUiLanguage(stored) ? stored : "ar"; }
+
+export function applyLanguageDocumentAttributes(language: Language, root: Document = document) {
+  const meta = languageMeta[language];
+  root.documentElement.lang = language;
+  root.documentElement.dir = meta.dir;
+  root.body.dir = meta.dir;
+  root.body.dataset.language = language;
+}
+
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  const [language, setLanguageState] = useState<Language>(readStoredLanguage);
+  const [isLanguageChanging, setIsLanguageChanging] = useState(false);
+  const meta = languageMeta[language];
+  useEffect(() => {
+    applyLanguageDocumentAttributes(language);
+    if (!isPublicLanguagePath(window.location.pathname)) window.localStorage.setItem(DASHBOARD_LANGUAGE_STORAGE_KEY, language);
+    applyLegacyUiTranslations(language);
+    const observer = new MutationObserver((mutations) => mutations.forEach((mutation) => {
+      if (mutation.type === "characterData" && mutation.target instanceof CharacterData) {
+        scheduleLegacyUiTranslations(language, mutation.target.parentNode ?? document);
+      } else {
+        mutation.addedNodes.forEach((node) => scheduleLegacyUiTranslations(language, node));
+      }
+    }));
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+    return () => { observer.disconnect(); };
+  }, [language, meta.dir]);
+  const value = useMemo<LanguageContextValue>(() => ({ language, direction: meta.dir, locale: meta.locale, isLanguageChanging, setLanguage: (next, persist = true) => { if (next !== language) { animateLanguageChange(); setIsLanguageChanging(true); if (typeof window !== "undefined") window.setTimeout(() => setIsLanguageChanging(false), 420); } setLanguageState(next); if (persist && typeof window !== "undefined") { window.localStorage.setItem(languageStorageKey(), next); if (isPublicLanguagePath(window.location.pathname)) window.localStorage.setItem(MENU_LANGUAGE_MANUAL_STORAGE_KEY, next); } }, t: createTranslator(language), formatDate: (input) => formatGregorianDate(input, language), formatNumber: (input) => formatLatinNumber(input, language)   }), [language, meta.dir, meta.locale, isLanguageChanging]);
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function useLanguage() { const context = useContext(LanguageContext); if (!context) throw new Error("useLanguage must be used within LanguageProvider"); return context; }

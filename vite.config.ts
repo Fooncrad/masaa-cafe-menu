@@ -152,6 +152,30 @@ function vitePluginManusDebugCollector(): Plugin {
 
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
 
+function manualChunks(id: string) {
+  const normalizedId = id.replaceAll("\\\\", "/");
+  if (!normalizedId.includes("node_modules")) {
+    if (normalizedId.includes("/client/src/components/") || normalizedId.includes("/client/src/pages/")) {
+      if (/\/(PosView|KdsOperationsBoard|KitchenTicketBoard|CompactOrdersBoard|OrderRealtimeAlerts|DriverDeliveryView|DeliveryOperationsPanel|KitchenPrinterSettings|ReservationsView|ReservationSchedulePanel|ReservationPolicyPanel)\./.test(normalizedId)) return "dashboard-operations";
+      if (/\/(MenuAddonsPanel|TranslationGlossaryPanel|TranslationReviewPanel|MediaLibraryPanel|MenuImportReviewPanel|RestaurantMenuInsightsPanel|QROperationsPanel)\./.test(normalizedId)) return "dashboard-content";
+      if (/\/(ContentMarketplace|CustomerRewardsWalletPanel|CustomerContentLibrary|CustomerProfileSettings|VcardAccountBinding|LoyaltyPanel|ReviewsPanel)\./.test(normalizedId)) return "dashboard-growth";
+      if (/\/(HomeModules)\./.test(normalizedId)) return "dashboard-overview-modules";
+      if (/\/(Home)\./.test(normalizedId)) return "dashboard-shell";
+      if (/\/RestaurantOverviewWorkspace\./.test(normalizedId)) return "dashboard-overview-workspace";
+      if (/\/ManagerOperationsPanel\./.test(normalizedId)) return "dashboard-manager-operations";
+      if (/\/SmartInsightsPanel\./.test(normalizedId)) return "dashboard-smart-insights";
+      if (/\/PlatformOverview\./.test(normalizedId)) return "dashboard-platform-overview";
+      if (/\/(AuditSecurityAlerts|WaiterCallsPanel|WaiterResponseStatsPanel|DashboardQuickAccess|PendingTransferBanner|MobileNavigationDrawer|HomeSidebar|PlatformSettingsPanel|ActivityAnalyticsPanel)\./.test(normalizedId)) return "dashboard-overview";
+    }
+    return undefined;
+  }
+  // Keep React-dependent UI libraries in the consuming chunks. Splitting
+  // lucide-react/Radix manually can create an initialization cycle where
+  // forwardRef is undefined in production before React has initialized.
+  if (normalizedId.includes("react-barcode")) return "vendor-barcode";
+  return undefined;
+}
+
 export default defineConfig({
   plugins,
   resolve: {
@@ -167,6 +191,11 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Keep route-level lazy imports for performance and split heavy dashboard
+    // modules so the initial authenticated shell does not carry every station.
+    rollupOptions: {
+      output: { manualChunks },
+    },
   },
   server: {
     host: true,
@@ -179,6 +208,10 @@ export default defineConfig({
       "localhost",
       "127.0.0.1",
     ],
+    hmr: {
+      protocol: "wss",
+      clientPort: 443,
+    },
     fs: {
       strict: true,
       deny: ["**/.*"],

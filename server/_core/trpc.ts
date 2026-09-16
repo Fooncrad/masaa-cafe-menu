@@ -27,11 +27,50 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+export const restaurantAdminProcedure = protectedProcedure.use(
+  t.middleware(async opts => {
+    if (opts.ctx.user?.testRole !== "restaurant_admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "إجراء مخصص لمدير المطعم" });
+    }
+    return opts.next({ ctx: { ...opts.ctx, user: opts.ctx.user } });
+  }),
+);
+
+export const testRoleProcedure = (...roles: string[]) => protectedProcedure.use(
+  t.middleware(async opts => {
+    const role = opts.ctx.user?.testRole;
+    if (role && !roles.includes(role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تنفيذ هذا الإجراء" });
+    }
+    return opts.next({ ctx: { ...opts.ctx, user: opts.ctx.user } });
+  }),
+);
+
+export const translationEditorProcedure = protectedProcedure.use(
+  t.middleware(async opts => {
+    const user = opts.ctx.user;
+    if (!user || (user.role !== "admin" && user.testRole !== "admin" && String(user.testRole) !== "translation_editor")) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "تحتاج إلى صلاحية محرر ترجمة" });
+    }
+    return opts.next({ ctx: { ...opts.ctx, user } });
+  }),
+);
+
+export const platformAdminProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    if (!ctx.user || (ctx.user.role !== "admin" && ctx.user.testRole !== "admin")) {
+      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    if (!ctx.user || (ctx.user.role !== "admin" && ctx.user.testRole !== "admin" && ctx.user.testRole !== "restaurant_admin")) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

@@ -1,0 +1,29 @@
+import { describe, expect, it } from "vitest";
+import { haversineDistanceKm, pointInPolygon } from "./db";
+import { validateGuestCheckoutDetails } from "./routers";
+
+describe("delivery and customer preference contracts", () => {
+  it("calculates geographic distance in kilometers", () => {
+    expect(haversineDistanceKm(24.7136, 46.6753, 24.7136, 46.6753)).toBe(0);
+    expect(haversineDistanceKm(24.7136, 46.6753, 24.758, 46.6753)).toBeGreaterThan(4);
+    expect(haversineDistanceKm(24.7136, 46.6753, 24.758, 46.6753)).toBeLessThan(6);
+  });
+
+  it("accepts only points inside a custom delivery polygon", () => {
+    const polygon = [{ latitude: 24, longitude: 46 }, { latitude: 24, longitude: 47 }, { latitude: 25, longitude: 47 }, { latitude: 25, longitude: 46 }];
+    expect(pointInPolygon(24.5, 46.5, polygon)).toBe(true);
+    expect(pointInPolygon(25.5, 46.5, polygon)).toBe(false);
+  });
+
+  it("requires location data for delivery checkout", () => {
+    expect(validateGuestCheckoutDetails({ channel: "delivery", deliveryAddress: "Riyadh" })).toContain("موقعه");
+    expect(validateGuestCheckoutDetails({ channel: "delivery", deliveryAddress: "Riyadh", deliveryLatitude: 24.7, deliveryLongitude: 46.6 })).toBeNull();
+  });
+
+  it("keeps each special order channel validated independently", () => {
+    expect(validateGuestCheckoutDetails({ channel: "dine_in", tableName: "4" })).toContain("عدد الأشخاص");
+    expect(validateGuestCheckoutDetails({ channel: "reservation", reservationDate: new Date() })).toBeNull();
+    expect(validateGuestCheckoutDetails({ channel: "hotel", hotelId: 10 })).toContain("الغرفة");
+    expect(validateGuestCheckoutDetails({ channel: "hotel", hotelId: 10, hotelRoomId: 14 })).toBeNull();
+  });
+});

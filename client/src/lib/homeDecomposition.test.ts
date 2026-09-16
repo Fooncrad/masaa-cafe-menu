@@ -1,0 +1,218 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const homeSource = readFileSync(
+  new URL("../pages/Home.tsx", import.meta.url),
+  "utf8"
+);
+const sidebarSource = readFileSync(
+  new URL("../components/HomeSidebar.tsx", import.meta.url),
+  "utf8"
+);
+const modulesSource = readFileSync(
+  new URL("../components/HomeModules.tsx", import.meta.url),
+  "utf8"
+);
+const quickAccessSource = readFileSync(
+  new URL("../components/DashboardQuickAccess.tsx", import.meta.url),
+  "utf8"
+);
+const compactOrdersSource = readFileSync(
+  new URL("../components/CompactOrdersBoard.tsx", import.meta.url),
+  "utf8"
+);
+const driverDeliverySource = readFileSync(
+  new URL("../components/DriverDeliveryView.tsx", import.meta.url),
+  "utf8"
+);
+const visualSystemSource = readFileSync(
+  new URL("../index.css", import.meta.url),
+  "utf8"
+);
+const integrationsSource = readFileSync(
+  new URL("../pages/IntegrationsSettings.tsx", import.meta.url),
+  "utf8"
+);
+
+describe("Home decomposition", () => {
+  it("keeps the primary shell small and delegates navigation to HomeSidebar", () => {
+    expect(homeSource).toContain("import { HomeSidebar }");
+    expect(homeSource).toContain("const LazyModuleView = lazy(");
+    expect(homeSource).not.toContain("function ModuleView(");
+    expect(homeSource.length).toBeLessThan(77000);
+  });
+
+  it("keeps global motion rules for sidebar, language, and reduced motion", () => {
+    expect(visualSystemSource).toContain("nfood-unified-sidebar");
+    expect(visualSystemSource).toContain("nfood-language-transition");
+    expect(visualSystemSource).toContain("prefers-reduced-motion: reduce");
+  });
+
+  it("organizes central admin navigation into collapsible platform groups", () => {
+    expect(sidebarSource).toContain('id: "platform-overview"');
+    expect(sidebarSource).toContain('id: "platform-directory"');
+    expect(sidebarSource).not.toContain('id: "platform-management"');
+    expect(sidebarSource).toContain('id: "platform-settings"');
+    expect(sidebarSource).toContain("collapsedGroups");
+    expect(sidebarSource).toContain("nfood:sidebar-groups:");
+    expect(sidebarSource).toContain("localStorage.getItem(sidebarStorageKey)");
+    expect(sidebarSource).toContain("window.localStorage.setItem(");
+    expect(sidebarSource).toContain("sidebarStorageKey");
+    expect(sidebarSource).toContain(
+      "isCentralAdmin ? platformGroups : sidebarGroups"
+    );
+    expect(sidebarSource).toContain("aria");
+    expect(sidebarSource).toContain("nfood-unified-sidebar");
+    expect(sidebarSource).toContain("data-sidebar-collapsed");
+    expect(sidebarSource).toContain("data-sidebar-mode");
+    expect(sidebarSource).toContain("const showRestaurantWorkspace = [");
+    expect(sidebarSource).toContain('"restaurant_admin"');
+    expect(sidebarSource).toContain('"cashier"');
+    expect(sidebarSource).toContain("{showRestaurantWorkspace && (");
+    expect(sidebarSource).toContain("workspaceQuery");
+    expect(sidebarSource).toContain("filteredBranches");
+    expect(sidebarSource).toContain("AnimatePresence");
+  });
+
+  it("shows a role-aware quick access grid and a visible, compact sidebar", () => {
+    expect(homeSource).toContain("<DashboardQuickAccess items={quickItems}");
+    expect(homeSource).toContain(
+      'location === "/register" || location === "/restaurant/register"'
+    );
+    expect(homeSource).toContain('location === "/login"');
+    expect(homeSource).toContain('direction === "rtl"');
+    expect(homeSource).toContain('lg:mr-[256px]');
+    expect(homeSource).toContain('lg:mr-[80px]');
+    expect(homeSource).toContain('lg:ml-[256px]');
+    expect(homeSource).toContain('lg:ml-[80px]');
+    expect(sidebarSource).toContain('dir={direction}');
+    expect(sidebarSource).toContain('start-0');
+    expect(sidebarSource).toContain("getSidebarWidth(sidebarCollapsed)");
+    expect(sidebarSource).toContain("isSidebarToggleShortcut");
+    expect(sidebarSource).toContain("nfood-unified-sidebar");
+    expect(sidebarSource).toContain(
+      "nfood-sidebar-nav nfood-scroll-area min-h-0 flex-1 space-y-1 overflow-y-auto"
+    );
+    expect(homeSource).toContain("nfood-dashboard-content nfood-scroll-area min-h-0 flex-1 overflow-y-auto");
+    expect(modulesSource).toContain("data-settings-hub");
+    expect(modulesSource).toContain('role="tablist" aria-label="أقسام إعدادات المطعم"');
+    expect(sidebarSource).toContain("sidebarCollapsedKey");
+    expect(sidebarSource).toContain("data-sidebar-collapsed");
+    expect(sidebarSource).toContain("roleScope");
+    expect(sidebarSource).toContain("overflow-hidden overscroll-contain");
+    expect(sidebarSource).not.toContain('onClick={() => onNavigate("settings")}');
+    expect(quickAccessSource).toContain(
+      'keys: ["pos", "orders", "kds", "menu"'
+    );
+    expect(quickAccessSource).toContain(
+      'keys: ["branches", "inventory", "team"'
+    );
+    expect(quickAccessSource).toContain("group.items.map");
+  });
+
+  it("keeps package cards visible and integrations platform-scoped", () => {
+    expect(modulesSource).toContain(
+      "const isOpen = true"
+    );
+    expect(modulesSource).toContain("className=\"grid\"");
+    expect(modulesSource).toContain("enabledCount");
+    expect(modulesSource).toContain("isRecommended");
+    expect(modulesSource).toContain("الأكثر شيوعًا");
+    expect(modulesSource).not.toContain("grid-rows-[0fr]");
+    expect(integrationsSource).toContain("LockKeyhole");
+    expect(integrationsSource).toContain("يتطلب ترقية الباقة");
+    expect(integrationsSource).toContain('scope: "platform"');
+    expect(integrationsSource).toContain(
+      'provider.providerKey === "google_oauth"'
+    );
+    expect(integrationsSource).not.toContain('setScope("restaurant")');
+    expect(integrationsSource).not.toContain("تكاملات المطعم");
+    expect(sidebarSource).toContain("{isCentralAdmin && (");
+    expect(sidebarSource).not.toContain("scope=restaurant");
+  });
+
+  it("keeps the translation manager usable for platform and restaurant admins", () => {
+    const panelSource = readFileSync(
+      new URL("../components/TranslationReviewPanel.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(panelSource).toContain("استيراد JSON");
+    expect(panelSource).toContain("تصدير JSON");
+    expect(panelSource).toContain("ابحث عن نص أو كلمة محددة");
+    expect(panelSource).toContain('role="tablist"');
+    expect(panelSource).toContain("updateMenuCategory");
+    expect(panelSource).toContain("updateMenuItem");
+  });
+
+  it("uses compact single-screen summaries for orders and driver delivery", () => {
+    expect(modulesSource).toContain("import { CompactOrdersBoard }");
+    expect(modulesSource).toContain('if (active === "orders")');
+    expect(modulesSource).toContain(
+      '<OperationalModuleShell title="إدارة الطلبات">'
+    );
+    expect(modulesSource).toContain("<CompactOrdersBoard");
+    expect(compactOrdersSource).toContain(
+      "<CompactModuleSummary metrics={metrics} />"
+    );
+    expect(compactOrdersSource).toContain("ordersLoading");
+    expect(compactOrdersSource).toContain('viewMode === "kanban"');
+    expect(compactOrdersSource).toContain("nfood:orders-view");
+    expect(compactOrdersSource).toContain("طريقة عرض الطلبات");
+    expect(driverDeliverySource).toContain(
+      "<CompactModuleSummary metrics={summary} />"
+    );
+    expect(driverDeliverySource).toContain("summary");
+    expect(driverDeliverySource).toContain(
+      "<CompactModuleSummary metrics={summary}"
+    );
+    expect(modulesSource).toContain('title="المخزون والمشتريات"');
+    expect(modulesSource).toContain('title="الحجوزات والأوقات"');
+    expect(modulesSource).toContain('title="الفروع والإعدادات"');
+    expect(modulesSource).toContain('title="نقطة البيع POS"');
+    expect(modulesSource).toContain("title={station === \"bar\"");
+    expect(modulesSource).toContain('title="الطاولات"');
+  });
+
+  it("keeps POS offline fallback and replay wiring intact", () => {
+    expect(modulesSource).toContain("readPosCache<CachedPosMenuItem[]>");
+    expect(modulesSource).toContain("remoteMenu.data ?? cachedMenu ?? []");
+    expect(modulesSource).toContain("remoteBranches.data ?? cachedBranches ?? []");
+    expect(modulesSource).toContain("enqueueOfflineItem");
+    expect(modulesSource).toContain("replayOfflineQueue");
+    expect(modulesSource).toContain("syncInFlightRef");
+    expect(modulesSource).toContain('window.addEventListener("online", refresh)');
+    expect(modulesSource).toContain('window.addEventListener("nfood:sync-request", refresh)');
+  });
+
+  it("keeps POS routing and single-screen order controls explicit", () => {
+    expect(modulesSource).toContain("data-pos-category-shortcuts");
+    expect(modulesSource).toContain("data-pos-routing-selector");
+    expect(modulesSource).toContain("selectedRoutingSectionIds");
+    expect(modulesSource).toContain("routingSectionIds");
+    expect(modulesSource).toContain("إرسال الطلب للأقسام المحددة");
+    expect(modulesSource).not.toContain("إرسال الطلب للمطبخ");
+    expect(modulesSource).toContain("data-pos-submit-order");
+    expect(modulesSource).toContain("data-pos-mobile-cart-jump");
+    expect(modulesSource).toContain("xl:max-h-[calc(100vh-156px)]");
+  });
+
+  it("keeps the deferred operational modules self-contained", () => {
+    expect(modulesSource).toContain("export function ModuleView(");
+    expect(modulesSource).toContain("trpc.platform.menuItems.useQuery");
+    expect(homeSource).toContain("trpc.platform.ordersByRestaurant.useQuery");
+    expect(sidebarSource).toContain("export function HomeSidebar(");
+    expect(sidebarSource).toContain("onNavigate");
+    expect(homeSource).toContain('id: "restaurant-operations"');
+    expect(homeSource).toContain('id: "restaurant-people-growth"');
+    expect(homeSource).toContain('id: "restaurant-workspace"');
+    expect(homeSource).toContain('id: "restaurant-system"');
+    expect(homeSource).toContain('"waiters", "printers", "inventory", "reservations"');
+    expect(homeSource).toContain('id: "restaurant-drivers"');
+    expect(sidebarSource).toContain("aria-expanded={!isGroupCollapsed}");
+    expect(sidebarSource).toContain("activeGroupId");
+    expect(homeSource).toContain('data-testid="dashboard-center-canvas"');
+    expect(homeSource).toContain('data-testid="dashboard-center-header"');
+    expect(homeSource).toContain('data-testid="dashboard-center-workspace"');
+    expect(homeSource).toContain("max-w-[1600px]");
+  });
+});

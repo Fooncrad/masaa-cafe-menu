@@ -1,0 +1,71 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BellRing, CheckCircle2, Radio, ShoppingBag, Volume2, VolumeX, X } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useLanguage, type Language } from "@/contexts/LanguageContext";
+import { toast } from "sonner";
+import { getOrderStatusPalette } from "@/lib/statusPalette";
+import { playOrderAlertSound, primeOrderAlertAudio } from "@/lib/orderAlertSound";
+
+export type RealtimeOrder = { id: string; status: string; table: string; time: string };
+type Props = { orders: RealtimeOrder[]; mode: "pos" | "kds" };
+
+type Copy = { syncPos: string; syncKds: string; lastUpdate: string; connected: string; activeOrders: string; newAlert: string; statusAlert: string; arrived: string; statusChanged: string; close: string; empty: string; soundOn: string; soundOff: string; status: Record<string, string> };
+const copy: Partial<Record<Language, Copy>> = {
+  ar: { syncPos: "مزامنة نقاط البيع", syncKds: "مزامنة شاشة المطبخ", lastUpdate: "آخر تحديث", connected: "متصل", activeOrders: "طلب نشط", newAlert: "طلب جديد يحتاج المتابعة", statusAlert: "تم تحديث حالة طلب", arrived: "وصل {id} إلى النظام", statusChanged: "{id}: {status}", close: "إغلاق التنبيه", empty: "لا توجد طلبات نشطة حاليًا.", soundOn: "كتم صوت التنبيه", soundOff: "تشغيل صوت التنبيه", status: { new: "طلب جديد", preparing: "قيد التحضير", ready: "جاهز", completed: "مكتمل", cancelled: "ملغى" } },
+  en: { syncPos: "POS sync", syncKds: "Kitchen display sync", lastUpdate: "Last update", connected: "Connected", activeOrders: "active orders", newAlert: "New order needs attention", statusAlert: "Order status updated", arrived: "{id} arrived in the system", statusChanged: "{id}: {status}", close: "Dismiss alert", empty: "There are no active orders right now.", soundOn: "Mute alert sound", soundOff: "Enable alert sound", status: { new: "New order", preparing: "Preparing", ready: "Ready", completed: "Completed", cancelled: "Cancelled" } },
+  fr: { syncPos: "Synchronisation POS", syncKds: "Synchronisation cuisine", lastUpdate: "Dernière mise à jour", connected: "Connecté", activeOrders: "commande(s) active(s)", newAlert: "Une nouvelle commande nécessite votre attention", statusAlert: "Statut de commande mis à jour", arrived: "{id} est arrivée dans le système", statusChanged: "{id} : {status}", close: "Fermer l’alerte", empty: "Aucune commande active pour le moment.", soundOn: "Couper le son des alertes", soundOff: "Activer le son des alertes", status: { new: "Nouvelle commande", preparing: "En préparation", ready: "Prête", completed: "Terminée", cancelled: "Annulée" } },
+  ur: { syncPos: "POS ہم وقت سازی", syncKds: "کچن ڈسپلے ہم وقت سازی", lastUpdate: "آخری اپ ڈیٹ", connected: "منسلک", activeOrders: "فعال آرڈرز", newAlert: "نیا آرڈر توجہ کا منتظر ہے", statusAlert: "آرڈر کی حالت اپ ڈیٹ ہو گئی", arrived: "{id} سسٹم میں موصول ہوا", statusChanged: "{id}: {status}", close: "تنبیہ بند کریں", empty: "اس وقت کوئی فعال آرڈر نہیں ہے۔", soundOn: "تنبیہ کی آواز بند کریں", soundOff: "تنبیہ کی آواز چلائیں", status: { new: "نیا آرڈر", preparing: "تیاری جاری", ready: "تیار", completed: "مکمل", cancelled: "منسوخ" } },
+};
+
+export function OrderRealtimeAlerts({ orders, mode }: Props) {
+  const { language, direction, locale } = useLanguage();
+  const text = copy[language] ?? copy.en ?? copy.ar!;
+  const previous = useRef<Map<string, string> | null>(null);
+  const [event, setEvent] = useState<{ type: "new" | "status"; order: RealtimeOrder } | null>(null);
+  const [lastSync, setLastSync] = useState(() => new Date());
+  const [soundEnabled, setSoundEnabled] = useState(() => typeof window === "undefined" ? true : localStorage.getItem(`nfood-order-alert-sound-${mode}`) !== "off");
+  const [alertVolume, setAlertVolume] = useState(() => typeof window === "undefined" ? 0.65 : Number(localStorage.getItem(`nfood-order-alert-volume-${mode}`) ?? "0.65"));
+  const snapshot = useMemo(() => new Map(orders.map((order) => [order.id, order.status])), [orders]);
+  useEffect(() => {
+    setLastSync(new Date());
+    if (!previous.current) { previous.current = snapshot; return; }
+    const old = previous.current;
+    const added = orders.find((order) => !old.has(order.id));
+    const changed = orders.find((order) => old.has(order.id) && old.get(order.id) !== order.status);
+    const nextEvent = added ? { type: "new" as const, order: added } : changed ? { type: "status" as const, order: changed } : null;
+    if (nextEvent) {
+      setEvent(nextEvent);
+      if (soundEnabled) void playOrderAlertSound({ volume: alertVolume, tone: nextEvent.type });
+      const status = text.status[nextEvent.order.status] ?? nextEvent.order.status;
+      toast.success((nextEvent.type === "new" ? text.arrived : text.statusChanged).replace("{id}", nextEvent.order.id).replace("{status}", status));
+    }
+    previous.current = snapshot;
+  }, [orders, snapshot, soundEnabled, alertVolume, text]);
+  const primeAudio = useCallback(() => { void primeOrderAlertAudio(); }, []);
+  const changeVolume = useCallback((value: number) => {
+    const next = Math.min(1, Math.max(0, value));
+    setAlertVolume(next);
+    localStorage.setItem(`nfood-order-alert-volume-${mode}`, String(next));
+  }, [mode]);
+  const toggleSound = useCallback(() => {
+    const next = !soundEnabled;
+    if (next) primeAudio();
+    setSoundEnabled(next);
+    localStorage.setItem(`nfood-order-alert-sound-${mode}`, next ? "on" : "off");
+  }, [mode, primeAudio, soundEnabled]);
+  const activeCount = useMemo(() => orders.filter((order) => !["completed", "cancelled"].includes(order.status)).length, [orders]);
+  const eventTone = useMemo(() => {
+    if (!event) return null;
+    if (event.type === "new") return { container: "border-orange-200 bg-orange-50 text-orange-900", icon: "bg-[#e76f3c] text-white", dot: "bg-[#e76f3c]" };
+    const palette = getOrderStatusPalette(event.order.status);
+    return { container: palette.className, icon: `${palette.className} shadow-sm`, dot: palette.dotClassName };
+  }, [event]);
+  return <div dir={direction} className="space-y-3">
+    <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="flex items-center gap-2"><span className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><Radio className="h-4 w-4" /><span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" /></span><div><p className="text-xs font-bold text-slate-800">{mode === "kds" ? text.syncKds : text.syncPos}</p><p className="text-[10px] text-slate-500">{text.lastUpdate} {lastSync.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p></div></div><div className="flex items-center gap-2"><button type="button" onClick={toggleSound} aria-label={soundEnabled ? text.soundOn : text.soundOff} title={soundEnabled ? text.soundOn : text.soundOff} className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500 transition hover:bg-orange-50 hover:text-orange-600">{soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</button><button type="button" onClick={() => { primeAudio(); void playOrderAlertSound({ volume: alertVolume, tone: "status" }); }} className="rounded-lg bg-orange-50 px-2 py-1 text-[10px] font-bold text-orange-700 hover:bg-orange-100">تجربة الصوت</button><label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500" title="مستوى صوت التنبيه"><Volume2 className="h-3.5 w-3.5" /><input aria-label="مستوى صوت التنبيه" type="range" min="0" max="1" step="0.05" value={alertVolume} onChange={(event) => changeVolume(Number(event.target.value))} className="w-16 accent-orange-500" /><span dir="ltr" className="w-7 text-center">{Math.round(alertVolume * 100)}%</span></label><Badge className="rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-50">{text.connected}</Badge><span className="text-xs font-semibold text-slate-500">{activeCount} {text.activeOrders}</span></div></CardContent></Card>
+    {event && eventTone && <div className={`flex items-start gap-3 rounded-2xl border p-4 shadow-sm ${eventTone.container}`} role="status"><div className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${eventTone.icon}`}><span className={`absolute -mr-7 -mt-7 h-2 w-2 rounded-full border border-white ${eventTone.dot}`} />{event.type === "new" ? <ShoppingBag className="h-4 w-4" /> : <BellRing className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-bold">{event.type === "new" ? text.newAlert : text.statusAlert}</p><p className="mt-1 text-xs">{event.order.id} · {event.order.table} · {text.status[event.order.status] ?? event.order.status}</p></div><button type="button" aria-label={text.close} onClick={() => setEvent(null)} className="rounded-lg p-1 opacity-70 transition hover:bg-black/5 hover:opacity-100"><X className="h-4 w-4" /></button></div>}
+    {activeCount === 0 && <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500"><CheckCircle2 className="h-4 w-4 text-emerald-500" />{text.empty}</div>}
+  </div>;
+}
+
+export default OrderRealtimeAlerts;
