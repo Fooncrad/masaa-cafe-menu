@@ -9,7 +9,7 @@ const salt = randomBytes(16).toString("base64");
 const passwordHash = `scrypt$${salt}$${scryptSync(password, Buffer.from(salt, "base64"), 64).toString("base64")}`;
 const db = await mysql.createConnection(process.env.DATABASE_URL);
 await db.execute(
-  "INSERT INTO testAccounts (email, displayName, role, passwordHash, isActive) VALUES (?, ?, 'admin', ?, 1) ON DUPLICATE KEY UPDATE displayName = VALUES(displayName), role = 'admin', passwordHash = VALUES(passwordHash), isActive = 1",
+  "INSERT INTO testAccounts (email, displayName, role, passwordHash, isActive, restaurantId) VALUES (?, ?, 'admin', ?, 1, (SELECT id FROM restaurants WHERE status IN ('active','trial') ORDER BY id LIMIT 1)) ON DUPLICATE KEY UPDATE displayName = VALUES(displayName), role = 'admin', passwordHash = VALUES(passwordHash), isActive = 1, restaurantId = COALESCE(testAccounts.restaurantId, VALUES(restaurantId))",
   [email, "مدير الموقع", passwordHash]
 );
 await db.end();

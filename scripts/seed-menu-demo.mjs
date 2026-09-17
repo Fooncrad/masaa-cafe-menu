@@ -14,8 +14,19 @@ const imagePool = [
 ];
 const coverUrl = "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1800&q=85";
 const defaultCategories = ["قهوة مختصة", "مشروبات باردة", "حلويات", "فطور", "مقبلات", "وجبات رئيسية", "سلطات", "إضافات"];
+const demoStores = [
+  ["متجر مساء التجريبي", "masaa-demo-cafe", "مقهى تجريبي لعرض واجهة المنيو"],
+  ["مطعم مساء التجريبي", "masaa-demo-restaurant", "مطعم تجريبي لعرض الأقسام والأصناف"],
+  ["متجر مساء المتنوع", "masaa-demo-market", "متجر تجريبي متعدد الأنشطة"],
+];
 
 const db = await mysql.createConnection(process.env.DATABASE_URL);
+for (const [name, slug, description] of demoStores) {
+  await db.execute(
+    "INSERT INTO restaurants (name, slug, barcode, status, plan, brandName, brandColor, brandAccentColor, brandTextColor, themeMode, menuTemplate, coverUrl, brandDescription, languagesJson, orderModesJson) VALUES (?, ?, ?, 'trial', 'Growth', ?, '#e76f3c', '#f59e0b', '#172033', 'light', 'editorial', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE brandDescription = VALUES(brandDescription), coverUrl = COALESCE(NULLIF(coverUrl, ''), VALUES(coverUrl)), status = 'trial'",
+    [name, slug, `DEMO-${slug}`, name, coverUrl, description, JSON.stringify(["ar", "en", "fr"]), JSON.stringify(["dineIn", "takeaway", "delivery", "reservation"])]
+  );
+}
 const [restaurants] = await db.query("SELECT id, name FROM restaurants WHERE status IN ('active','trial') ORDER BY id");
 if (!restaurants.length) throw new Error("لا توجد متاجر active أو trial لزرع البيانات التجريبية.");
 let total = 0;
