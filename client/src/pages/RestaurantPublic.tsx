@@ -353,7 +353,7 @@ export default function RestaurantPublic() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showFloatingSupport, setShowFloatingSupport] = useState(true);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
-  const [menuTemplate, setMenuTemplate] = useState<PublicMenuTemplate>("editorial");
+  const [menuTemplate, setMenuTemplate] = useState<PublicMenuTemplate>("customer");
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [pwaInstalled, setPwaInstalled] = useState(false);
   const [installHint, setInstallHint] = useState<"android" | "ios" | null>(null);
@@ -385,7 +385,7 @@ export default function RestaurantPublic() {
   const removeNoteTemplate = async (template: QuickNoteTemplate) => { if (user) await deleteMyNoteTemplate.mutateAsync({ id: template.id }); else persistLocalNoteTemplates(noteTemplates.filter((note) => note.id !== template.id)); if (editingNoteTemplateId === template.id) { setEditingNoteTemplateId(null); setEditingNoteTemplateText(""); } toast.success("تم حذف قالب الملاحظة"); };
   useEffect(() => { const media = window.matchMedia("(prefers-color-scheme: dark)"); const sync = () => setSystemDark(media.matches); sync(); media.addEventListener?.("change", sync); return () => media.removeEventListener?.("change", sync); }, []);
   useEffect(() => { const saved = localStorage.getItem(`nfood-menu-dark-${slug}`); if (saved === "1" || saved === "0") setThemeOverride(saved === "1"); }, [slug]);
-  useEffect(() => { const requested = new URLSearchParams(window.location.search).get("template"); if (requested === "editorial" || requested === "bistro" || requested === "glass" || requested === "customer") { setMenuTemplate(requested); localStorage.setItem(`nfood-menu-template-${slug}`, requested); return; } const saved = localStorage.getItem(`nfood-menu-template-${slug}`); if (saved === "editorial" || saved === "bistro" || saved === "glass" || saved === "customer") setMenuTemplate(saved); else { const configured = page.data?.restaurant.menuTemplate; if (configured === "editorial" || configured === "bistro" || configured === "glass" || configured === "customer") setMenuTemplate(configured); } }, [page.data?.restaurant.menuTemplate, slug]);
+  useEffect(() => { const requested = new URLSearchParams(window.location.search).get("template"); if (requested === "editorial" || requested === "bistro" || requested === "glass" || requested === "customer") { setMenuTemplate(requested); return; } setMenuTemplate("customer"); }, [slug]);
   const selectMenuTemplate = (template: PublicMenuTemplate) => { setMenuTemplate(template); localStorage.setItem(`nfood-menu-template-${slug}`, template); toast.success(template === "editorial" ? copy.editorial : template === "bistro" ? copy.bistro : template === "glass" ? copy.glass : copy.customer); };
   const themeMode = page.data?.restaurant.themeMode ?? "light";
   const themePreset = page.data?.restaurant.themePreset ?? "nfood-sunset";
