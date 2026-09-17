@@ -104,10 +104,21 @@ export default function LoginPage() {
   const copy = language === "fr" ? loginCopy.fr : language === "en" ? loginCopy.en : loginCopy.ar;
   const { user, loading } = useAuth();
   const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
   const [email, setEmail] = useState("nfood@ret.com");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const login = trpc.auth.testLogin.useMutation({ onSuccess: () => { toast.success(copy.toastSignedIn); setLocation("/"); }, onError: (error) => toast.error(error.message || copy.toastInvalid) });
+  const login = trpc.auth.testLogin.useMutation({
+    onSuccess: async (result) => {
+      await utils.auth.me.invalidate();
+      toast.success(copy.toastSignedIn);
+      const role = String(result.role ?? "");
+      if (role === "admin") setLocation("/admin");
+      else if (role === "customer") setLocation("/customer-portal");
+      else setLocation("/restaurant/dashboard");
+    },
+    onError: (error) => toast.error(error.message || copy.toastInvalid),
+  });
   const arrow = direction === "rtl" ? "h-4 w-4" : "h-4 w-4 rotate-180";
   const features = [copy.feat1, copy.feat2, copy.feat3];
 
