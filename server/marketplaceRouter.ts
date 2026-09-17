@@ -25,7 +25,7 @@ import {
 import { publicProcedure, protectedProcedure, adminProcedure, platformAdminProcedure, router } from "./_core/trpc";
 import type { TrpcContext } from "./_core/context";
 import { nanoid } from "nanoid";
-import { getDb, getMerchantRestaurantId, insertAuditLog } from "./db";
+import { getDb, getMerchantRestaurantId, getPlatformSettings, insertAuditLog } from "./db";
 import { sendPushToUser } from "./push";
 
 async function getProviderEntity(user: AuthUser) {
@@ -62,9 +62,12 @@ export const marketplaceRouter = router({
     const db = await getDb();
     if (!db) return [];
     const sectors = await db.select().from(marketplaceSectors).where(eq(marketplaceSectors.isActive, true)).orderBy(marketplaceSectors.sortOrder);
+    const settings = await getPlatformSettings();
+    let governance: Record<string, { imageUrl?: string; active?: boolean }> = {};
+    try { governance = JSON.parse(settings.sectorGovernanceJson || "{}"); } catch { governance = {}; }
     const counts = await db.select({ sectorId: marketplaceListings.sectorId, total: sql<number>`count(*)` }).from(marketplaceListings).where(eq(marketplaceListings.status, "active")).groupBy(marketplaceListings.sectorId);
     const countMap = new Map(counts.map((row) => [Number(row.sectorId), Number(row.total)]));
-    return sectors.map((sector) => ({ ...sector, listingCount: countMap.get(sector.id) ?? 0 }));
+    return sectors.filter((sector) => governance[sector.slug]?.active !== false).map((sector) => ({ ...sector, imageUrl: governance[sector.slug]?.imageUrl || null, listingCount: countMap.get(sector.id) ?? 0 }));
   }),
   publicStores: publicProcedure.input(z.object({ sectorSlug: z.string().trim().min(1).max(80).optional(), search: z.string().trim().max(120).optional() })).query(async ({ input }) => {
     const db = await getDb();

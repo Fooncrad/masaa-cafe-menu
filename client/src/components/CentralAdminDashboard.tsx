@@ -21,7 +21,7 @@ const translations = {
     sectors_title: 'لوحة حوكمة القطاعات الشاملة', sectors_subtitle: 'تعديل تسميات القطاعات، التفعيل والإيقاف، والتبليغ الجماعي أو المستهدف للمنشآت والعملاء', sector_status_active: 'مفعّل', sector_status_inactive: 'موقوف', sector_entities: 'منشأة', sector_restaurants: 'مطاعم',
     btn_edit_labels: 'تعديل التسمية', btn_activate: 'تفعيل', btn_deactivate: 'إيقاف', btn_broadcast: 'رسالة جماعية', btn_notify: 'إرسال تنبيه', btn_save: 'حفظ', btn_cancel: 'إلغاء', btn_close: 'إغلاق',
     notify_modal_title: 'إرسال إشعار إلى القطاع', notify_broadcast_all: 'إرسال للقطاع كاملاً', notify_targeted: 'إرسال لمنشآت محددة', notify_title_label: 'العنوان', notify_body_label: 'نص الرسالة', notify_type_label: 'نوع الإشعار', notify_select_entities: 'اختر المنشآت المستهدفة', notify_search_placeholder: 'ابحث عن منشأة...', notify_send: 'إرسال الآن', notify_sent: 'تم إرسال الإشعار', notify_failed: 'فشل إرسال الإشعار', notify_type_system: 'نظام', notify_type_message: 'رسالة', notify_type_task: 'مهمة', notify_type_payment: 'دفع', notify_selected: 'محددة',
-    edit_modal_title: 'تعديل بيانات القطاع', edit_label_ar: 'التسمية بالعربية', edit_label_en: 'التسمية بالإنجليزية', edit_label_fr: 'التسمية بالفرنسية', edit_active: 'حالة التفعيل', label_updated: 'تم تحديث تسمية القطاع', label_failed: 'فشل تحديث تسمية القطاع',
+    edit_modal_title: 'تعديل بيانات القطاع', edit_label_ar: 'التسمية بالعربية', edit_label_en: 'التسمية بالإنجليزية', edit_label_fr: 'التسمية بالفرنسية', edit_image: 'صورة القطاع أو البنر (رابط مربع 1:1)', edit_active: 'حالة التفعيل', label_updated: 'تم تحديث تسمية القطاع', label_failed: 'فشل تحديث تسمية القطاع',
     card_restaurants: 'المنشآت النشطة', card_accounts: 'الحسابات الكلية', card_subscriptions: 'الاشتراكات الفعالة', card_notifications: 'التنبيهات العاجلة', card_transfers: 'التحويلات المعلقة', card_files: 'ملفات السيرفر',
     table_title: 'منظومة حوكمة القدرات وتغيير الباقات بضغطة زر', table_subtitle: 'تنشيط وإيقاف القطاعات، تعديل الحزم الفورية، مراجعة الحسابات، ومعاينة القوائم الإلكترونية الحية',
     th_orderNum: 'المعرف الرقمي', th_customer: 'الجهة / المنشأة', th_restaurant: 'النوع / القطاع', th_status: 'الحالة التشغيلية', th_amount: 'الحزمة الحالية', th_lastUpdate: 'آخر تحديث', th_actions: 'إجراءات الحوكمة السريعة', btn_viewDetails: 'معاينة حية',
@@ -38,7 +38,7 @@ const translations = {
     sectors_title: 'All-Sector Governance Board', sectors_subtitle: 'Edit sector labels, activate/deactivate modules, and broadcast or target messages to entities & customers', sector_status_active: 'Active', sector_status_inactive: 'Inactive', sector_entities: 'entities', sector_restaurants: 'restaurants',
     btn_edit_labels: 'Edit Label', btn_activate: 'Activate', btn_deactivate: 'Deactivate', btn_broadcast: 'Broadcast', btn_notify: 'Send Alert', btn_save: 'Save', btn_cancel: 'Cancel', btn_close: 'Close',
     notify_modal_title: 'Send Notification to Sector', notify_broadcast_all: 'Send to entire sector', notify_targeted: 'Send to selected entities', notify_title_label: 'Title', notify_body_label: 'Message Body', notify_type_label: 'Notification Type', notify_select_entities: 'Select targeted entities', notify_search_placeholder: 'Search entities...', notify_send: 'Send Now', notify_sent: 'Notification sent', notify_failed: 'Failed to send notification', notify_type_system: 'System', notify_type_message: 'Message', notify_type_task: 'Task', notify_type_payment: 'Payment', notify_selected: 'selected',
-    edit_modal_title: 'Edit Sector Settings', edit_label_ar: 'Arabic Label', edit_label_en: 'English Label', edit_label_fr: 'French Label', edit_active: 'Activation Status', label_updated: 'Sector label updated', label_failed: 'Failed to update sector label',
+    edit_modal_title: 'Edit Sector Settings', edit_label_ar: 'Arabic Label', edit_label_en: 'English Label', edit_label_fr: 'French Label', edit_image: 'Sector or banner image (square 1:1 URL)', edit_active: 'Activation Status', label_updated: 'Sector label updated', label_failed: 'Failed to update sector label',
     card_restaurants: 'Active Entities', card_accounts: 'Total Accounts', card_subscriptions: 'Active Licenses', card_notifications: 'Urgent Alerts', card_transfers: 'Pending Transfers', card_files: 'Server Storage',
     table_title: 'Ecosystem Control & Plan Upgrade Panel', table_subtitle: 'Activate/deactivate business modules, switch tier plans instantly, audit billing, and preview digital menus',
     th_orderNum: 'Entity ID', th_customer: 'Entity / Client', th_restaurant: 'Type / Sector', th_status: 'Operational Status', th_amount: 'Current Plan', th_lastUpdate: 'Last Update', th_actions: 'Governance Actions', btn_viewDetails: 'Preview Live Menu',
@@ -55,7 +55,7 @@ const translations = {
     sectors_title: 'Tableau de Gouvernance des Secteurs', sectors_subtitle: 'Modifier les libellés, activer/désactiver les modules et diffuser des messages ciblés aux entités & clients', sector_status_active: 'Actif', sector_status_inactive: 'Inactif', sector_entities: 'entités', sector_restaurants: 'restaurants',
     btn_edit_labels: 'Modifier le Libellé', btn_activate: 'Activer', btn_deactivate: 'Désactiver', btn_broadcast: 'Diffuser', btn_notify: 'Envoyer une Alerte', btn_save: 'Enregistrer', btn_cancel: 'Annuler', btn_close: 'Fermer',
     notify_modal_title: 'Envoyer une Notification au Secteur', notify_broadcast_all: 'Envoyer à tout le secteur', notify_targeted: 'Envoyer aux entités sélectionnées', notify_title_label: 'Titre', notify_body_label: 'Corps du Message', notify_type_label: 'Type de Notification', notify_select_entities: 'Sélectionner les entités ciblées', notify_search_placeholder: 'Rechercher des entités...', notify_send: 'Envoyer', notify_sent: 'Notification envoyée', notify_failed: 'Échec de l\'envoi', notify_type_system: 'Système', notify_type_message: 'Message', notify_type_task: 'Tâche', notify_type_payment: 'Paiement', notify_selected: 'selectionnés',
-    edit_modal_title: 'Modifier les Paramètres du Secteur', edit_label_ar: 'Libellé Arabe', edit_label_en: 'Libellé Anglais', edit_label_fr: 'Libellé Français', edit_active: 'Statut d\'Activation', label_updated: 'Libellé du secteur mis à jour', label_failed: 'Échec de mise à jour du libellé',
+    edit_modal_title: 'Modifier les Paramètres du Secteur', edit_label_ar: 'Libellé Arabe', edit_label_en: 'Libellé Anglais', edit_label_fr: 'Libellé Français', edit_image: 'Image du secteur ou bannière (URL carrée 1:1)', edit_active: 'Statut d\'Activation', label_updated: 'Libellé du secteur mis à jour', label_failed: 'Échec de mise à jour du libellé',
     card_restaurants: 'Entités Actives', card_accounts: 'Comptes Totaux', card_subscriptions: 'Licences Actives', card_notifications: 'Alertes Urgentes', card_transfers: 'Transferts En Attente', card_files: 'Stockage Serveur',
     tab_orders: 'Commandes & Opérations', tab_customers: 'Intégration Clients', tab_purchases: 'Restaurants & Abonnements', tab_shipping: 'Livraison & Cartes NFC', table_title: 'Gestion des Capacités & Forfaits en 1-Clic', table_subtitle: 'Activer/désactiver les modules, changer de forfait instantanément et prévisualiser les catalogues',
     th_orderNum: 'ID Entité', th_customer: 'Entité / Client', th_restaurant: 'Type / Secteur', th_status: 'Statut Opérationnel', th_amount: 'Forfait Actuel', th_lastUpdate: 'Dernière Mise à Jour', th_actions: 'Actions de Gouvernance', btn_viewDetails: 'Aperçu Menu',
@@ -95,6 +95,7 @@ type SectorGovernance = {
   labelAr: string;
   labelEn: string;
   labelFr: string;
+  imageUrl?: string | null;
   active: boolean;
   entityCount: number;
   source: 'platformEntity' | 'contentCreators';
@@ -167,7 +168,7 @@ export function CentralAdminDashboard({ onToggleTheme, currentTheme }: { onToggl
   const sectors: SectorGovernance[] = sectorCatalogQuery.data?.sectors ?? [];
 
   const [editSectorKey, setEditSectorKey] = useState<string | null>(null);
-  const [editLabels, setEditLabels] = useState({ labelAr: '', labelEn: '', labelFr: '' });
+  const [editLabels, setEditLabels] = useState({ labelAr: '', labelEn: '', labelFr: '', imageUrl: '' });
   const [editActive, setEditActive] = useState(true);
 
   const updateSectorMutation = trpc.admin.updateSectorMeta.useMutation({
@@ -201,7 +202,7 @@ export function CentralAdminDashboard({ onToggleTheme, currentTheme }: { onToggl
 
   const openNotifyModal = (sector: SectorGovernance) => { setNotifyTargetSector(sector); setNotifyMode('broadcast'); setNotifyTitle(''); setNotifyBody(''); setNotifyType('system'); setNotifySelectedIds([]); setNotifyEntitySearch(''); setNotifyOpen(true); };
 
-  const openEditModal = (sector: SectorGovernance) => { setEditSectorKey(sector.key); setEditLabels({ labelAr: sector.labelAr, labelEn: sector.labelEn, labelFr: sector.labelFr }); setEditActive(sector.active); };
+  const openEditModal = (sector: SectorGovernance) => { setEditSectorKey(sector.key); setEditLabels({ labelAr: sector.labelAr, labelEn: sector.labelEn, labelFr: sector.labelFr, imageUrl: sector.imageUrl ?? '' }); setEditActive(sector.active); };
 
   const toggleSectorActive = (sector: SectorGovernance) => {
     const fields = lang === 'ar' ? { labelAr: sector.labelAr, labelEn: sector.labelEn, labelFr: sector.labelFr } : lang === 'en' ? { labelAr: sector.labelAr, labelEn: sector.labelEn, labelFr: sector.labelFr } : { labelAr: sector.labelAr, labelEn: sector.labelEn, labelFr: sector.labelFr };
@@ -787,6 +788,7 @@ export function CentralAdminDashboard({ onToggleTheme, currentTheme }: { onToggl
                   <span className="text-[10px] font-bold text-slate-400">{t.edit_label_fr}</span>
                   <input dir="ltr" value={editLabels.labelFr} onChange={(e) => setEditLabels((p) => ({ ...p, labelFr: e.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-orange-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
                 </label>
+                <label className="block"><span className="text-[10px] font-bold text-slate-400">{t.edit_image}</span><input dir="ltr" value={editLabels.imageUrl} onChange={(e) => setEditLabels((p) => ({ ...p, imageUrl: e.target.value }))} placeholder="https://..." className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-orange-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" /></label>
                 {sec.source !== 'contentCreators' && (
                   <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
                     <button type="button" onClick={() => setEditActive(!editActive)} className={`flex cursor-pointer items-center gap-2 text-[11px] font-black ${editActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
