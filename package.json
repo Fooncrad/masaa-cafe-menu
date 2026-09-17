@@ -16,6 +16,7 @@
     "e2e:mutations": "E2E_MUTATIONS=1 playwright test",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "db:seed:menu-demo": "node scripts/seed-menu-demo.mjs",
+    "db:seed:admin": "node scripts/seed-admin.mjs",
     "postinstall": "node .scripts/postinstall.mjs",
     "preinstall": "node .scripts/postinstall.mjs"
   },
