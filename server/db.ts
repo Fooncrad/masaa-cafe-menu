@@ -9,10 +9,48 @@ import { normalizeMenuTemplateSchedule, resolveActiveMenuTemplate } from "../sha
 import { sendPushToUser } from "./push";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _runtimeAuthSchemaReady = false;
+
+async function ensureRuntimeAuthSchema(db: ReturnType<typeof drizzle>) {
+  if (_runtimeAuthSchemaReady) return;
+  try {
+    await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS testAccounts (
+      id INT AUTO_INCREMENT NOT NULL,
+      restaurantId INT NULL,
+      email VARCHAR(320) NOT NULL,
+      displayName VARCHAR(120) NOT NULL,
+      phone VARCHAR(40) NULL,
+      role ENUM('admin','restaurant_admin','waiter','kitchen','bar','cashier','customer','driver') NOT NULL,
+      passwordHash VARCHAR(255) NOT NULL,
+      permissionsJson TEXT NULL,
+      isActive BOOLEAN NOT NULL DEFAULT TRUE,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY testAccounts_email_unique (email)
+    )`));
+    await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS authSessions (
+      id INT AUTO_INCREMENT NOT NULL,
+      userId INT NOT NULL,
+      sessionTokenHash VARCHAR(128) NOT NULL,
+      deviceLabel VARCHAR(160) NULL,
+      userAgent TEXT NULL,
+      ipAddress VARCHAR(64) NULL,
+      lastSeenAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expiresAt TIMESTAMP NOT NULL,
+      revokedAt TIMESTAMP NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY authSessions_token_unique (sessionTokenHash)
+    )`));
+    _runtimeAuthSchemaReady = true;
+  } catch (error) {
+    console.warn("[Database] Runtime auth schema initialization failed:", error);
+  }
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
-    try { _db = drizzle(process.env.DATABASE_URL); } catch (error) { console.warn("[Database] Failed to connect:", error); _db = null; }
+    try { _db = drizzle(process.env.DATABASE_URL); await ensureRuntimeAuthSchema(_db); } catch (error) { console.warn("[Database] Failed to connect:", error); _db = null; }
   }
   return _db;
 }
