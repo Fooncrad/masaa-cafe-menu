@@ -82,7 +82,6 @@ import LoginPage from "./pages/LoginPage";
 import RegisterScreen from "./pages/RegisterScreen";
 import { PricingPage, FeaturesPage, HowItWorksPage, LegalPage, ContactPage, SubscriptionStatusPage } from "./pages/PublicInfoPages";
 import { useAuth } from "./_core/hooks/useAuth";
-import MasaaCafesDemo from "./pages/MasaaCafesDemo";
 
 function PageLoading() {
   return <div className="min-h-screen bg-background px-4 py-4 text-foreground" aria-live="polite"><div className="mx-auto max-w-7xl space-y-3 opacity-80"><div className="h-10 w-48 animate-pulse rounded-2xl bg-muted" /><div className="grid gap-3 sm:grid-cols-3"><div className="h-24 animate-pulse rounded-2xl bg-muted" /><div className="h-24 animate-pulse rounded-2xl bg-muted" /><div className="h-24 animate-pulse rounded-2xl bg-muted" /></div></div></div>;
@@ -128,7 +127,7 @@ function AppContent() {
 
 const RESTAURANT_AREA_ROLES = new Set(["restaurant_admin", "waiter", "driver", "cashier", "kitchen", "bar", "restaurant"]);
 function CustomerAreaGuard({ children }: { children: ReactNode }) { const { user, loading } = useAuth(); const [, navigate] = useLocation(); const role = String(user?.testRole ?? user?.role ?? ""); const blocked = Boolean(user && RESTAURANT_AREA_ROLES.has(role)); useEffect(() => { if (blocked) navigate("/restaurant/dashboard"); }, [blocked, navigate]); if (loading || blocked) return <PageLoading />; return <>{children}</>; }
-function RootRoute() { const { user, loading } = useAuth(); if (loading) return <PageLoading />; return user ? <Home /> : <MasaaCafesDemo />; }
+function RootRoute() { const { user, loading } = useAuth(); if (loading) return <PageLoading />; return user ? <Home /> : <PublicHome />; }
 function LegacyStoresRoute() { const [, navigate] = useLocation(); useEffect(() => { navigate("/marketplace", { replace: true }); }, [navigate]); return <PageLoading />; }
 
 function Router() {
@@ -156,7 +155,6 @@ function Router() {
       <Route path="/contact" component={ContactPage} />
       <Route path="/subscription-status" component={SubscriptionStatusPage} />
       <Route path="/marketplace" component={MarketplaceLanding} />
-      <Route path="/masaa-cafes" component={MasaaCafesDemo} />
       <Route path="/marketplace/sector/:slug" component={MarketplaceSector} />
       <Route path="/stores" component={LegacyStoresRoute} />
       <Route path="/store/:entityId/rewards" component={StoreRewards} />
