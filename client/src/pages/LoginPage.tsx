@@ -109,8 +109,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const login = trpc.auth.testLogin.useMutation({
-    onSuccess: async (result) => {
-      await utils.auth.me.invalidate();
+    onSuccess: (result) => {
+      void utils.auth.me.invalidate().catch(() => undefined);
       toast.success(copy.toastSignedIn);
       const role = String(result.role ?? "");
       if (role === "admin") setLocation("/admin");
