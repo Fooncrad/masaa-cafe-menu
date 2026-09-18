@@ -1,1 +1,1 @@
-ALTER TABLE `restaurants` ADD `languagesJson` text DEFAULT ('["ar","en","fr"]');
+ALTER TABLE `restaurants` ADD `languagesJson` text;

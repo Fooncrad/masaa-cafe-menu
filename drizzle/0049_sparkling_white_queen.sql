@@ -1,1 +1,1 @@
-ALTER TABLE `restaurants` MODIFY COLUMN `languagesJson` text DEFAULT ('["ar","en","fr","ur"]');
+ALTER TABLE `restaurants` MODIFY COLUMN `languagesJson` text;
